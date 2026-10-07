@@ -1,0 +1,5 @@
+## Private Microsoft Office source files
+*.doc
+*.docx
+*.xls
+*.xlsx
