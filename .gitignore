@@ -1,9 +1,5 @@
-## Private Microsoft Office source files
-*.doc
-*.docx
-*.xls
-*.xlsx
-*.pdf
+## Private project inputs (not published)
+/docs-private/
 
 ## Visual Studio / build outputs
 .vs/
@@ -33,3 +29,10 @@ logs/
 backups/
 exports/
 data-queue/
+
+## PostgreSQL/database backup artifacts
+*.dump
+*.backup
+*.bak
+/backups/**/*.sql
+**/backups/**/*.sql
