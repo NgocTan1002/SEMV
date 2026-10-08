@@ -4,3 +4,32 @@
 *.xls
 *.xlsx
 *.pdf
+
+## Visual Studio / build outputs
+.vs/
+**/.vs/
+**/bin/
+**/obj/
+TestResults/
+packages/
+
+## User-specific and generated files
+*.user
+*.suo
+*.pdb
+*.exe
+*.cache
+*.log
+*.vsidx
+*.tmp
+
+## Local runtime data and secrets
+appsettings.Local.json
+appsettings.*.Local.json
+*.secrets.json
+.env
+.env.*
+logs/
+backups/
+exports/
+data-queue/

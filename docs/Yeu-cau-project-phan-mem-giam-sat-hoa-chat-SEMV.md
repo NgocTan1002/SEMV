@@ -10,7 +10,9 @@
 | Số điểm giai đoạn đầu | 21 tank |
 | Khả năng mở rộng | Tối thiểu 40 tank |
 | Giao tiếp thiết bị | RS485, Modbus RTU |
+| Cơ sở dữ liệu | PostgreSQL |
 | Ngày lập tài liệu | 07/10/2026 |
+| Ngày cập nhật | 08/10/2026 |
 | Trạng thái | Bản yêu cầu ban đầu, cần xác nhận trước khi phát triển |
 
 ## 2. Tài liệu đầu vào
@@ -54,7 +56,7 @@ Phần mềm là lớp giám sát. Đèn, còi và các liên động an toàn t
 - Xác nhận alarm bởi người vận hành.
 - Lưu lịch sử nhiệt độ, cảnh báo và lỗi kết nối.
 - Biểu đồ nhiệt độ thời gian thực và lịch sử.
-- Tra cứu, lọc và xuất CSV hoặc Excel.
+- Tra cứu, lọc và xuất CSV. Xuất Excel chỉ triển khai khi thư viện và giấy phép đã được IT/pháp chế chấp thuận.
 - Quản lý cấu hình tank, thiết bị và ngưỡng.
 - Phân quyền cơ bản và nhật ký thao tác.
 - Sao lưu, khôi phục dữ liệu.
@@ -73,6 +75,7 @@ Các chức năng sau chỉ thực hiện khi có yêu cầu bổ sung:
 - Kết nối với MES, SCADA trung tâm hoặc hệ thống quản lý của Samsung.
 - High availability, máy chủ dự phòng hoặc đồng bộ nhiều máy trạm.
 - Chữ ký điện tử và quy trình phê duyệt nhiều cấp.
+- Tách acquisition thành Windows Service độc lập; phiên bản 1 dùng WinForms background service và watchdog theo quyết định kiến trúc tại phần 6.
 
 ## 5. Thông tin thiết bị và truyền thông
 
@@ -107,6 +110,7 @@ Thông số thực tế phải được kiểm tra trên từng controller trư�
 - Giai đoạn 21 tank có thể dùng một tuyến nếu chất lượng cáp và thời gian quét đáp ứng.
 - Khi mở rộng lên 40 tank, phần mềm phải hỗ trợ ít nhất hai COM port hoặc hai gateway RS485.
 - Mỗi tuyến phải được cấu hình và vận hành độc lập. Lỗi trên một tuyến không được làm dừng tuyến còn lại.
+- Thiết bị đang Online được polling theo chu kỳ cấu hình. Thiết bị Offline chuyển sang probe có backoff 10–30 giây và số retry giới hạn để không làm chậm toàn tuyến.
 
 ### 5.4 Dữ liệu cần đọc từ thiết bị
 
@@ -121,6 +125,17 @@ Tối thiểu cần xác định được các thanh ghi sau:
 - Đơn vị và vị trí dấu thập phân.
 
 Các địa chỉ thanh ghi, function code, scale và kiểu dữ liệu phải lấy từ tài liệu truyền thông chính thức. Không được suy đoán register khi phát hành phiên bản vận hành.
+
+Chương trình mẫu Autonics hiện có chỉ được dùng làm bằng chứng tham khảo cho một phần register map. Các điểm đang thấy trong sample gồm Model `0x0068`, PV `0x03E8`, SV `0x03EB` và Status `0x03EE`; các địa chỉ này vẫn phải đối chiếu communication manual và controller thật trước khi khóa cấu hình production.
+
+Trước khi hoàn thành driver phải lập bảng register có kiểm soát phiên bản, tối thiểu gồm: model/firmware áp dụng, function code, địa chỉ, số register, quyền read/write, kiểu signed/unsigned, byte/word order, scale, đơn vị, bit mask, giá trị sensor error và nguồn tài liệu. PV/SV phải được kiểm thử với giá trị âm bằng `Int16` hoặc kiểu signed đúng theo manual, sau đó mới áp dụng scale/dấu thập phân.
+
+Phải thực hiện spike đo hai phương án:
+
+- Đọc từng register riêng lẻ.
+- Đọc block liên tục từ `0x03E8` đến `0x03EE` nếu manual và controller cho phép đọc các khoảng giữa.
+
+Chỉ dùng block read khi controller thật trả dữ liệu ổn định, parser ánh xạ đúng và thời gian quét tốt hơn. Nếu không đạt, driver phải tự dùng danh sách request riêng lẻ đã được xác nhận. Không được giả định các register nằm giữa là hợp lệ.
 
 ## 6. Kiến trúc phần mềm đề xuất
 
@@ -142,13 +157,13 @@ Autonics TK4W controllers
 
 Application Services
        |
-SQLite database
+PostgreSQL database server
 ```
 
 ### 6.1 Các lớp chính
 
 - Presentation: form, user control, dashboard, chart và dialog cấu hình.
-- Application: điều phối polling, alarm, tra cứu, báo cáo và backup.
+- Application: điều phối polling, alarm, tra cứu, báo cáo, migration và backup.
 - Domain: Tank, Device, TemperatureSample, AlarmEvent và các quy tắc nghiệp vụ.
 - Infrastructure: SerialPort, Modbus RTU, database, logging và file export.
 - Background services: đọc thiết bị và lưu dữ liệu mà không khóa giao diện.
@@ -157,11 +172,22 @@ SQLite database
 
 - C# và Windows Forms.
 - .NET 10 LTS, target `net10.0-windows`, build x64.
-- SQLite cho hệ thống một máy trạm.
-- SQL Server chỉ dùng khi có yêu cầu nhiều máy cùng truy cập hoặc lưu trữ tập trung.
+- PostgreSQL là cơ sở dữ liệu chính của hệ thống.
+- Phiên bản PostgreSQL do IT phê duyệt; đề xuất dùng phiên bản còn được cộng đồng hỗ trợ tại thời điểm triển khai, tối thiểu PostgreSQL 16.
+- Kết nối từ C# qua `Npgsql`; truy cập dữ liệu bằng Dapper hoặc lớp repository tương đương, không viết SQL trực tiếp trong Form.
+- Schema phải được quản lý bằng migration có đánh số phiên bản và có khả năng kiểm tra phiên bản database khi ứng dụng khởi động.
+- Mặc định phiên bản 1 có thể chạy PostgreSQL như Windows Service trên máy giám sát. Nếu dùng máy chủ database tập trung, địa chỉ máy chủ, firewall, TLS, tài khoản dịch vụ và chính sách backup phải được IT phê duyệt trước triển khai.
 - Giao tiếp serial thông qua `System.IO.Ports` và lớp Modbus RTU riêng hoặc thư viện đã được kiểm tra.
 - Logging dạng file có giới hạn kích thước và tự xoay vòng.
 - Installer dạng MSI hoặc bộ cài tương đương đã được bộ phận IT chấp thuận.
+
+### 6.3 Quyết định tiến trình và watchdog phiên bản 1
+
+- Phiên bản 1 giữ acquisition, alarm và historian trong cùng ứng dụng WinForms nhưng chạy bằng background service/task, không đặt logic trong Form và không khóa UI.
+- Ứng dụng được khởi động bằng Windows Task Scheduler ở chế độ `At startup/At logon` theo chính sách IT; watchdog kiểm tra tiến trình, ghi sự kiện và khởi động lại khi ứng dụng dừng ngoài kế hoạch.
+- Ứng dụng phải có heartbeat nội bộ cho polling, historian và database queue; trạng thái `Healthy/Degraded/Faulted` hiển thị trên màn hình chẩn đoán.
+- Việc restart tự động phải có giới hạn và backoff để tránh vòng lặp khởi động liên tục; mọi lần restart phải được log.
+- Nếu nhà máy yêu cầu vẫn thu thập dữ liệu khi chưa đăng nhập Windows hoặc tách quyền UI/acquisition, phải chuyển acquisition sang Windows Service. Đây là thay đổi kiến trúc ngoài phạm vi phiên bản 1 và ước lượng thêm 3–5 ngày phát triển cùng kiểm thử cài đặt/nâng cấp.
 
 ## 7. Yêu cầu chức năng
 
@@ -184,9 +210,13 @@ SQLite database
 
 - Đọc lần lượt từng thiết bị, không gửi nhiều request đồng thời trên cùng một tuyến RS485.
 - Chu kỳ quét mặc định 2 giây, cấu hình được trong khoảng 1–10 giây.
+- Driver ưu tiên block read đã được xác nhận trên controller thật; nếu không được hỗ trợ phải fallback sang các request riêng lẻ mà không thay đổi dữ liệu đầu ra.
+- Thiết bị Online và Offline phải có lịch polling riêng. Sau khi thiết bị được xác định Offline, probe lại theo backoff cấu hình được từ 10–30 giây; một thiết bị Offline không được chiếm toàn bộ thời gian quét của tuyến.
+- Mỗi request chỉ retry số lần giới hạn; không retry vô hạn và không tạo nhiều request đang chờ trên cùng một tuyến.
 - Giao diện không được treo khi thiết bị timeout.
 - Dữ liệu đọc được phải có timestamp và trạng thái chất lượng.
 - Không ghi dữ liệu giả hoặc giá trị cũ thành dữ liệu mới khi thiết bị mất kết nối.
+- Parser phải xử lý đúng signed/unsigned, scale, decimal position và giá trị sensor error theo register map được phê duyệt.
 
 ### FR-04 Dashboard
 
@@ -224,6 +254,14 @@ SQLite database
   - Phát âm thanh trên máy tính.
   - Ghi lịch sử ngay lập tức.
 - Khi kết nối được khôi phục phải ghi sự kiện Communication Restored.
+- Mỗi trạng thái cảnh báo phải lưu rõ nguồn:
+  - `SoftwareAlarm`: phần mềm tính từ PV, ngưỡng, hysteresis và delay.
+  - `ControllerAlarm`: bit/trạng thái đọc trực tiếp từ bộ điều khiển.
+  - `LocalHardwareAlarm`: tín hiệu cảnh báo/liên động tại tủ nếu được đưa vào hệ thống.
+- Alarm tại controller/hardware là lớp bảo vệ cục bộ; SoftwareAlarm phục vụ dashboard, lịch sử và hỗ trợ vận hành, không thay thế liên động an toàn.
+- Không được mặc định AL1 là High và AL2 là Low nếu chưa xác nhận cấu hình alarm của controller.
+- Khi các nguồn đã cấu hình không thống nhất quá thời gian cho phép, tạo `AlarmMismatch` riêng; mismatch không được tự ý đổi trạng thái của nguồn còn lại.
+- Alarm đang hoạt động nhưng chưa được acknowledge phải nhắc lại bằng âm thanh/hiển thị theo khoảng thời gian cấu hình, không tạo AlarmEvent mới và không thay đổi `StartedAtUtc`.
 
 ### FR-06 Lịch sử alarm
 
@@ -240,6 +278,9 @@ SQLite database
 - Không lưu lặp vô hạn dữ liệu lỗi khi thiết bị mất kết nối.
 - Chính sách lưu dữ liệu phải cấu hình được; đề xuất ban đầu tối thiểu 12 tháng.
 - Có công cụ dọn dữ liệu cũ theo chính sách đã được phê duyệt.
+- Bảng dữ liệu mẫu phải hỗ trợ phân vùng theo thời gian, đề xuất theo tháng, để việc lưu trữ và dọn dữ liệu không làm gián đoạn hệ thống.
+- Mỗi mẫu/sự kiện phải có khóa định danh chống ghi trùng khi ứng dụng phát lại dữ liệu sau sự cố kết nối database.
+- Khi PostgreSQL tạm thời không khả dụng, ứng dụng phải cảnh báo và lưu dữ liệu vào hàng đợi bền vững cục bộ tối thiểu 24 giờ theo chu kỳ lưu đã cấu hình; dữ liệu được ghi bù theo thứ tự khi kết nối phục hồi.
 
 ### FR-08 Biểu đồ và tra cứu
 
@@ -251,7 +292,8 @@ SQLite database
 
 ### FR-09 Xuất dữ liệu
 
-- Xuất CSV hoặc Excel.
+- Xuất CSV là chức năng bắt buộc của phiên bản 1 và không phụ thuộc Microsoft Excel.
+- Xuất `.xlsx` là P1, chỉ bật khi thư viện tạo Excel đã được kiểm tra giấy phép và IT chấp thuận; nếu chưa được duyệt, phần mềm vẫn đủ điều kiện nghiệm thu với CSV.
 - Hỗ trợ xuất lịch sử nhiệt độ và lịch sử alarm.
 - File xuất phải có tên tank, thời gian, PV, SV, ngưỡng và trạng thái.
 - Định dạng ngày giờ phải thống nhất theo múi giờ vận hành tại Việt Nam.
@@ -269,7 +311,10 @@ Tối thiểu có hai vai trò:
   - Thay đổi cấu hình thiết bị, tank, ngưỡng và hệ thống.
   - Backup và restore.
 
-Nếu chưa triển khai tài khoản người dùng trong phiên bản đầu, việc thay đổi cấu hình phải được bảo vệ bằng mật khẩu quản trị.
+- Không dùng một tài khoản Operator dùng chung nếu cần truy vết người acknowledge/thay đổi cấu hình.
+- Hỗ trợ chuyển người dùng nhanh bằng mã nhân viên + PIN/mật khẩu hoặc Windows identity theo chính sách IT; thao tác acknowledge phải gắn với người đang đăng nhập tại thời điểm thao tác.
+- Phiên làm việc tự khóa sau thời gian không thao tác cấu hình được; dashboard vẫn được phép tiếp tục hiển thị và thu thập dữ liệu.
+- Tài khoản Administrator dùng riêng, không sử dụng chung với tài khoản PostgreSQL hay tài khoản Windows service.
 
 ### FR-11 Nhật ký thao tác
 
@@ -281,11 +326,13 @@ Nếu chưa triển khai tài khoản người dùng trong phiên bản đầu, 
 
 ### FR-12 Backup và restore
 
-- Backup database thủ công.
-- Hỗ trợ backup tự động theo lịch nếu được bật.
-- Kiểm tra tính hợp lệ của file backup trước khi restore.
-- Không cho restore khi hệ thống đang ghi dữ liệu mà chưa dừng an toàn.
+- Backup PostgreSQL thủ công bằng quy trình được ứng dụng hoặc quản trị viên gọi qua `pg_dump`.
+- Hỗ trợ backup tự động theo lịch nếu được bật; file backup phải lưu ngoài thư mục cài đặt ứng dụng và tuân theo thời hạn lưu do IT phê duyệt.
+- Backup phải bao gồm schema, dữ liệu và thông tin phiên bản migration; không đưa mật khẩu database vào file backup hoặc command log.
+- Kiểm tra file backup bằng cách `pg_restore` vào một database kiểm thử riêng trước khi xác nhận backup hợp lệ.
+- Không restore đè trực tiếp database đang được ứng dụng sử dụng; phải đưa ứng dụng vào chế độ bảo trì, dừng tác vụ ghi và restore vào database đích đã xác định.
 - Có hướng dẫn phục hồi khi thay máy tính.
+- Quy trình phải nêu rõ phiên bản PostgreSQL/`pg_dump`/`pg_restore` tương thích và tài khoản được phép thực hiện.
 
 ### FR-13 Chẩn đoán và log
 
@@ -293,6 +340,21 @@ Nếu chưa triển khai tài khoản người dùng trong phiên bản đầu, 
 - Không ghi mật khẩu dưới dạng rõ trong log.
 - Có màn hình chẩn đoán cho quản trị viên.
 - Cho phép xem request/response Modbus ở chế độ kỹ thuật; mặc định phải tắt để tránh file log quá lớn.
+
+### FR-14 Chế độ bảo trì
+
+- Administrator được đưa một tank, một tuyến hoặc toàn hệ thống vào Maintenance Mode.
+- Khi bật phải nhập lý do, phạm vi, thời điểm bắt đầu, người thực hiện và thời gian tự hết hạn; mặc định không cho phép bảo trì vô thời hạn nếu chưa có quyền đặc biệt.
+- Giao diện phải hiển thị Maintenance Mode rõ ràng, không được dùng màu giống trạng thái Normal.
+- Polling và lưu lịch sử vẫn tiếp tục trừ khi người quản trị chọn dừng tuyến; quy tắc suppress âm thanh/thông báo phải cấu hình rõ, không xóa AlarmEvent hoặc che mất Communication Error ngoài phạm vi bảo trì.
+- Mọi thao tác bật, gia hạn, kết thúc hoặc tự hết hạn phải ghi audit log.
+
+### FR-15 Giám sát sức khỏe ứng dụng
+
+- Hiển thị trạng thái polling, historian, PostgreSQL, durable queue, dung lượng lưu trữ và thời điểm heartbeat gần nhất.
+- Có cảnh báo khi queue tăng liên tục, backup thất bại, database gần đầy hoặc một background task ngừng hoạt động.
+- Watchdog được phép khởi động lại ứng dụng theo chính sách đã phê duyệt nhưng phải giới hạn số lần, có backoff và lưu nguyên nhân.
+- Có thao tác xuất gói chẩn đoán gồm log đã loại bỏ secret, phiên bản ứng dụng, cấu hình không nhạy cảm và trạng thái service để hỗ trợ xử lý sự cố.
 
 ## 8. Quy tắc nhiệt độ và cảnh báo ban đầu
 
@@ -354,37 +416,71 @@ Thiết lập alarm đề xuất ban đầu:
 
 - Id.
 - TankId.
-- Timestamp.
+- SampledAtUtc (`timestamptz`).
 - PV.
 - SV.
 - Quality.
 - DeviceStatus.
+- SourceEventId dùng để chống ghi trùng khi replay.
 
 ### AlarmEvents
 
 - Id.
 - TankId.
 - AlarmType.
-- StartTime.
-- EndTime.
+- AlarmSource (`SoftwareAlarm`, `ControllerAlarm`, `LocalHardwareAlarm`, `AlarmMismatch`).
+- StartedAtUtc (`timestamptz`).
+- EndedAtUtc (`timestamptz`, nullable).
 - StartValue.
 - EndValue.
 - LowLimit.
 - HighLimit.
 - AcknowledgedBy.
-- AcknowledgedAt.
+- AcknowledgedAtUtc (`timestamptz`, nullable).
 - Note.
+
+### MaintenancePeriods
+
+- Id.
+- ScopeType và ScopeId.
+- Reason.
+- StartedAtUtc.
+- ExpiresAtUtc.
+- EndedAtUtc.
+- StartedBy và EndedBy.
+- SuppressSound/SuppressNotification theo chính sách đã phê duyệt.
+
+### ApplicationHealthEvents
+
+- Id.
+- Component.
+- HealthStatus.
+- OccurredAtUtc.
+- Message.
+- RecoveryAtUtc.
+- CorrelationId.
 
 ### AuditLogs
 
 - Id.
-- Timestamp.
+- CreatedAtUtc (`timestamptz`).
 - UserName.
 - Action.
 - ObjectType.
 - ObjectId.
 - OldValue.
 - NewValue.
+
+### Quy ước PostgreSQL
+
+- Tất cả thời điểm lưu trong database dùng UTC với kiểu `timestamptz`; chỉ chuyển sang múi giờ Việt Nam tại lớp hiển thị/xuất báo cáo.
+- Tên bảng/cột phải thống nhất một quy ước, đề xuất `snake_case`; không phụ thuộc chữ hoa/thường trong câu SQL.
+- Khóa chính dùng `bigint generated ... as identity` hoặc UUID theo một lựa chọn thống nhất; khóa ngoại và index phải được khai báo rõ.
+- `temperature_samples` phân vùng theo `sampled_at_utc`, đề xuất mỗi tháng một partition; có index tổng hợp theo `tank_id, sampled_at_utc`.
+- Có unique constraint/index phù hợp cho mã tank, địa chỉ Modbus trong cùng connection và `source_event_id` để ngăn dữ liệu replay bị trùng.
+- Nhiệt độ và ngưỡng phải dùng kiểu số có độ chính xác xác định, không dùng kiểu chuỗi; scale từ controller được xử lý trước khi ghi.
+- Mỗi migration chỉ chạy một lần và được ghi vào bảng lịch sử migration.
+- Hàng đợi bền vững khi mất PostgreSQL là vùng đệm kỹ thuật cục bộ, không phải database nghiệp vụ thứ hai; dữ liệu phải có checksum/định dạng phiên bản và giới hạn dung lượng.
 
 ## 10. Yêu cầu phi chức năng
 
@@ -394,13 +490,17 @@ Thiết lập alarm đề xuất ban đầu:
 - Thời gian hiển thị giá trị mới không lớn hơn một chu kỳ polling cộng thời gian đọc toàn tuyến.
 - Tra cứu dữ liệu một tháng của một tank phải hoàn thành trong thời gian mục tiêu dưới 3 giây trên máy vận hành tiêu chuẩn.
 - Việc xuất dữ liệu lớn phải chạy nền và có thông báo tiến độ.
+- Ghi mẫu phải dùng transaction ngắn, batch hợp lý và connection pooling; không mở một connection mới cho từng tank.
+- Bảng mẫu phải có index phục vụ truy vấn theo `TankId + Timestamp`; thiết kế partition/index phải được kiểm tra với dữ liệu mô phỏng tối thiểu 12 tháng cho 40 tank.
 
 ### NFR-02 Độ ổn định
 
-- Không crash khi mất COM port, rút USB-RS485, controller mất nguồn hoặc database tạm thời bị khóa.
+- Không crash khi mất COM port, rút USB-RS485, controller mất nguồn, PostgreSQL restart hoặc mất kết nối mạng tới database.
 - Ứng dụng phải tự phục hồi kết nối khi điều kiện bình thường trở lại.
 - Một thiết bị lỗi không được chặn polling các thiết bị khác.
 - Một tuyến RS485 lỗi không được làm dừng tuyến khác.
+- Lỗi lưu database không được làm dừng polling; trạng thái `Database Disconnected/Degraded` phải hiển thị rõ và được ghi log.
+- Việc ghi bù từ hàng đợi phải có cơ chế idempotent để không tạo sample, alarm hoặc audit log trùng.
 
 ### NFR-03 An toàn dữ liệu
 
@@ -408,13 +508,17 @@ Thiết lập alarm đề xuất ban đầu:
 - Backup phải được kiểm tra có thể mở lại.
 - Không xóa dữ liệu vận hành nếu chưa có xác nhận và chính sách lưu trữ.
 - Đồng hồ máy tính phải được đồng bộ thời gian theo chính sách IT của nhà máy.
+- Timestamp phải lưu bằng `timestamptz` theo UTC; giao diện và file xuất hiển thị theo múi giờ vận hành Việt Nam.
+- Migration phải được chạy có kiểm soát, có log và có backup trước thay đổi schema trên môi trường production.
 
 ### NFR-04 Bảo mật
 
 - Chỉ Administrator được thay đổi cấu hình quan trọng.
 - Mật khẩu phải lưu bằng phương pháp băm, không lưu dạng rõ.
-- Không mở cổng mạng khi phiên bản 1 chỉ hoạt động nội bộ trên một máy.
-- Nếu bổ sung truy cập từ xa, phải dùng mạng nội bộ hoặc VPN và được IT Samsung phê duyệt.
+- Ứng dụng dùng tài khoản PostgreSQL riêng với quyền tối thiểu; không dùng tài khoản `postgres` khi vận hành.
+- Chuỗi kết nối và mật khẩu database không được hard-code hoặc lưu dạng rõ; trên Windows phải bảo vệ bằng DPAPI/Windows Credential Manager hoặc giải pháp quản lý secret do IT phê duyệt.
+- Nếu PostgreSQL chạy cùng máy, chỉ cho phép kết nối loopback trừ khi IT phê duyệt khác. Nếu chạy trên máy chủ riêng, chỉ mở cổng database cho đúng máy ứng dụng, ưu tiên TLS và tuyệt đối không public ra Internet.
+- Truy cập từ xa phải dùng mạng nội bộ hoặc VPN và được IT Samsung phê duyệt.
 
 ### NFR-05 Khả năng bảo trì
 
@@ -422,6 +526,7 @@ Thiết lập alarm đề xuất ban đầu:
 - Thông tin register phải tách khỏi giao diện, có thể thay đổi theo model hoặc firmware.
 - Có unit test cho CRC16, parse register, alarm state machine và lưu dữ liệu.
 - Có simulator để phát triển và kiểm thử khi không có thiết bị thật.
+- Simulator phải fault-injection được: no response, delay, bad CRC, fragmented frame, Modbus exception, negative value, sensor error và disconnect/recovery.
 
 ### NFR-06 Triển khai
 
@@ -429,6 +534,16 @@ Thiết lập alarm đề xuất ban đầu:
 - Hỗ trợ độ phân giải 1920 x 1080 và DPI scaling thông dụng.
 - Có bộ cài đặt và quy trình nâng cấp không làm mất database/configuration.
 - Có tùy chọn tự khởi động cùng Windows.
+- Bộ cài phải kiểm tra PostgreSQL service, khả năng kết nối, phiên bản schema và quyền ghi trước khi cho phép vận hành.
+- Không tự động cài PostgreSQL hoặc thay đổi `pg_hba.conf`, firewall và tài khoản hệ thống nếu chưa được IT phê duyệt.
+
+### NFR-07 Dependency và giấy phép
+
+- Trước khi khóa Release Candidate phải có danh sách toàn bộ NuGet package, runtime, chart/export library, installer tool và license tương ứng.
+- Chỉ dùng dependency có nguồn rõ ràng, phiên bản được khóa và còn được bảo trì; không tự động nâng version production nếu chưa chạy regression test.
+- CSV là định dạng xuất bắt buộc không cần thư viện thương mại. Excel, chart nâng cao hoặc installer thương mại chỉ được đưa vào bản release sau khi license được xác nhận.
+- Phải tạo Software Bill of Materials hoặc bảng dependency tối thiểu gồm tên, version, nguồn, license, mục đích và trạng thái phê duyệt.
+- Kiểm tra lỗ hổng dependency trước Release Candidate; phát hiện mức Critical/High phải được xử lý hoặc có phê duyệt ngoại lệ bằng văn bản.
 
 ## 11. Các màn hình dự kiến
 
@@ -444,8 +559,11 @@ Thiết lập alarm đề xuất ban đầu:
 10. Quản lý người dùng.
 11. Backup và restore.
 12. Nhật ký hệ thống và chẩn đoán truyền thông.
+13. Chế độ bảo trì và lịch sử bảo trì.
+14. Sức khỏe ứng dụng, PostgreSQL, durable queue và watchdog.
+15. Chuyển người dùng nhanh để acknowledge alarm.
 
-## 12. Điều kiện đầu vào để bắt đầu phát triển
+## 12. Điều kiện đầu vào M0 trước khi bắt đầu tính thời gian phát triển
 
 Các điều kiện sau cần có hoặc cần được xác nhận:
 
@@ -455,6 +573,8 @@ Các điều kiện sau cần có hoặc cần được xác nhận:
 - Xác nhận một tuyến hay nhiều tuyến RS485.
 - Danh sách địa chỉ Modbus của từng controller.
 - Communication user manual hoặc register map chính thức.
+- Bảng register đã ghi rõ function code, address, length, signed/unsigned, scale, decimal, unit, bit mask, sensor error và nguồn tài liệu.
+- Xác nhận cấu hình AL1/AL2 của từng controller; không mặc định AL1/AL2 tương ứng High/Low.
 - Một controller TK4W RS485 thật.
 - Một bộ chuyển đổi USB-RS485 hoặc gateway sử dụng thực tế.
 - Xác nhận ngưỡng High/Low của từng tank.
@@ -463,8 +583,16 @@ Các điều kiện sau cần có hoặc cần được xác nhận:
 - Xác nhận định dạng báo cáo cần xuất.
 - Xác nhận phiên bản Windows, chính sách cài đặt và quyền Administrator trên máy vận hành.
 - Xác nhận yêu cầu tài khoản người dùng và phân quyền.
+- Chọn cơ chế định danh người vận hành: tài khoản ứng dụng + PIN hoặc Windows identity; không dùng tài khoản chung nếu cần audit.
+- Chốt PostgreSQL local hay server tập trung, tài khoản dịch vụ, TLS/firewall, backup và quyền IT.
+- Chốt CSV là bắt buộc; quyết định Excel dựa trên thư viện và giấy phép được phê duyệt.
+- Hoàn thành kiểm tra license/dependency dự kiến cho Modbus, chart, Excel, PostgreSQL client, logging và installer.
+- Chốt phương án watchdog phiên bản 1; xác nhận có yêu cầu thu thập khi chưa đăng nhập Windows hay không.
+- Repository đã có `.gitignore` loại trừ tài liệu Office/PDF riêng tư, secret, `.vs`, `bin`, `obj`, log, backup, export và dữ liệu runtime; các file generated đã được bỏ theo dõi khỏi Git.
 
 Nếu chưa có thiết bị thật, có thể phát triển với simulator nhưng không được nghiệm thu chức năng truyền thông cho đến khi kiểm thử trên phần cứng thực tế.
+
+M0 không tính vào 25 ngày phát triển. Nếu một đầu vào P0 còn thiếu, task phụ thuộc phải ở trạng thái Blocked và tiến độ chính thức chưa bắt đầu hoặc được điều chỉnh bằng change request.
 
 ## 13. Điều kiện hoàn thành phần mềm
 
@@ -485,6 +613,9 @@ Phần mềm chỉ được coi là hoàn thành khi đáp ứng đầy đủ c�
 - Kiểm thử được timeout, CRC error, mất nguồn, mất cáp và khôi phục kết nối.
 - Không trùng địa chỉ thiết bị.
 - Polling đủ số lượng thiết bị trong chu kỳ đã thống nhất.
+- Spike block read và single-register read có kết quả đo trên controller thật; phương án được chọn có bằng chứng và fallback đã kiểm thử.
+- Thiết bị Offline dùng backoff/probe, không làm chậm bất hợp lý các thiết bị Online.
+- Test giá trị âm, decimal position, sensor error, fragmented frame và Modbus exception đạt yêu cầu.
 
 ### 13.3 Hoàn thành alarm
 
@@ -493,6 +624,9 @@ Phần mềm chỉ được coi là hoàn thành khi đáp ứng đầy đủ c�
 - Ghi đúng thời gian bắt đầu, kết thúc và xác nhận.
 - Hysteresis và delay hoạt động đúng.
 - Sau khi khởi động lại ứng dụng, trạng thái alarm phải được khôi phục hợp lý từ điều kiện thực tế và database.
+- Phân biệt được SoftwareAlarm, ControllerAlarm, LocalHardwareAlarm và AlarmMismatch theo phạm vi tín hiệu thực tế.
+- Reminder không tạo AlarmEvent trùng và không thay đổi thời điểm bắt đầu alarm.
+- Maintenance Mode hiển thị rõ, có lý do/người/thời hạn và đầy đủ audit log.
 
 ### 13.4 Hoàn thành dữ liệu
 
@@ -501,6 +635,9 @@ Phần mềm chỉ được coi là hoàn thành khi đáp ứng đầy đủ c�
 - Tra cứu và xuất dữ liệu cho kết quả đúng.
 - Backup tạo thành công và restore được trên môi trường kiểm thử.
 - Việc nâng cấp phiên bản không làm mất dữ liệu đã có.
+- PostgreSQL restart/mất mạng không làm dừng polling; queue giữ và ghi bù dữ liệu không trùng.
+- Capacity test tối thiểu 12 tháng/40 tank đạt mục tiêu truy vấn và có báo cáo dung lượng.
+- Timestamp lưu UTC và hiển thị đúng múi giờ vận hành Việt Nam.
 
 ### 13.5 Hoàn thành kiểm thử
 
@@ -509,6 +646,9 @@ Phần mềm chỉ được coi là hoàn thành khi đáp ứng đầy đủ c�
 - Test nhiều địa chỉ bằng thiết bị thật hoặc simulator hoàn thành.
 - Chạy liên tục tối thiểu 72 giờ mà không có crash hoặc mất dữ liệu nghiêm trọng.
 - UAT được người đại diện vận hành xác nhận.
+- Simulator fault injection bao phủ no response, delay, bad CRC, fragmented frame, Modbus exception, negative value, sensor error và recovery.
+- Watchdog/Task Scheduler, giới hạn restart và heartbeat của background task đã được kiểm thử.
+- Ma trận truy vết không còn yêu cầu P0/P1 bắt buộc thiếu task, test case hoặc bằng chứng kết quả.
 
 ### 13.6 Hoàn thành bàn giao
 
@@ -518,6 +658,7 @@ Phần mềm chỉ được coi là hoàn thành khi đáp ứng đầy đủ c�
 - Bàn giao database schema và hướng dẫn backup/restore.
 - Bàn giao tài liệu cài đặt, vận hành và xử lý sự cố cơ bản.
 - Bàn giao danh sách dependency và license liên quan.
+- Bàn giao ma trận truy vết yêu cầu–task–test và Software Bill of Materials/dependency register.
 - Đào tạo người vận hành và quản trị viên.
 
 ## 14. Kịch bản nghiệm thu chính
@@ -539,12 +680,23 @@ Phần mềm chỉ được coi là hoàn thành khi đáp ứng đầy đủ c�
 | AT-13 | Một thiết bị timeout | Các thiết bị còn lại vẫn được cập nhật |
 | AT-14 | Một tuyến RS485 lỗi | Tuyến còn lại vẫn hoạt động |
 | AT-15 | Chạy liên tục 72 giờ | Không crash, không treo UI và không mất dữ liệu nghiêm trọng |
+| AT-16 | Giá trị âm và decimal position | PV/SV sau scale khớp controller, không bị chuyển thành số unsigned |
+| AT-17 | So sánh block read và single read | Phương án được chọn đọc đúng dữ liệu, đạt chu kỳ quét và fallback hoạt động |
+| AT-18 | Nhiều thiết bị Offline | Thiết bị Online vẫn được cập nhật; Offline được probe theo backoff và không retry vô hạn |
+| AT-19 | Controller alarm khác SoftwareAlarm | Hiển thị đúng từng nguồn và tạo AlarmMismatch theo thời gian cấu hình |
+| AT-20 | Alarm chưa acknowledge | Reminder hoạt động nhưng không tạo sự kiện trùng hoặc đổi StartedAtUtc |
+| AT-21 | Maintenance Mode | Hiển thị rõ phạm vi/lý do/người/thời hạn; tự hết hạn và ghi audit đầy đủ |
+| AT-22 | PostgreSQL restart/mất mạng | Polling tiếp tục, queue lưu tối thiểu 24 giờ và ghi bù không trùng khi phục hồi |
+| AT-23 | Dữ liệu 12 tháng/40 tank | Query một tháng của một tank dưới mục tiêu và retention/partition hoạt động |
+| AT-24 | Watchdog dừng ứng dụng/background task | Phát hiện, cảnh báo/restart theo chính sách, có backoff và log nguyên nhân |
+| AT-25 | Chuyển Operator và acknowledge | Audit lưu đúng người thực hiện; không chấp nhận danh tính dùng chung không truy vết được |
 
 ## 15. Sản phẩm bàn giao
 
 - Source code C# WinForms.
 - File solution và project.
 - Script hoặc migration tạo database.
+- Bộ script tạo role/database, cấp quyền tối thiểu và cấu hình kết nối PostgreSQL mẫu không chứa mật khẩu thật.
 - Bộ cài đặt bản Release x64.
 - File cấu hình mẫu cho 21 tank.
 - Simulator hoặc công cụ test Modbus dùng trong phát triển.
@@ -553,6 +705,7 @@ Phần mềm chỉ được coi là hoàn thành khi đáp ứng đầy đủ c�
 - Tài liệu hướng dẫn vận hành.
 - Tài liệu cấu hình thiết bị và địa chỉ Modbus.
 - Tài liệu backup, restore và xử lý sự cố.
+- Tài liệu cài đặt/vận hành PostgreSQL, migration, theo dõi dung lượng và xử lý mất kết nối database.
 - Danh sách phiên bản, dependency và giấy phép sử dụng.
 
 ## 16. Kế hoạch thực hiện khi sử dụng AI hỗ trợ
@@ -561,23 +714,24 @@ Giả định một lập trình viên WinForms có kinh nghiệm, làm việc t
 
 | Giai đoạn | Công việc | Thời gian dự kiến |
 |---|---|---:|
-| 1 | Chốt yêu cầu, register map và wireframe | 2–3 ngày |
-| 2 | Tạo solution, kiến trúc, database và configuration | 1–2 ngày |
-| 3 | Driver Modbus RTU, simulator, retry và reconnect | 2–3 ngày |
-| 4 | Dashboard 21/40 tank | 2–3 ngày |
-| 5 | Alarm engine và lịch sử alarm | 2–3 ngày |
-| 6 | Historian, trend, tra cứu và export | 2–3 ngày |
-| 7 | Phân quyền, audit log, backup và installer | 2–3 ngày |
-| 8 | Kiểm thử controller thật, UAT và sửa lỗi | 3–5 ngày |
+| M0 | Chốt phạm vi, register map, ngưỡng, hạ tầng PostgreSQL và quyền IT | Không tính trong 25 ngày |
+| 1 | Driver Modbus RTU, simulator, block-read spike, offline backoff | 5 ngày |
+| 2 | Kiến trúc, PostgreSQL, durable queue và dashboard | 5 ngày |
+| 3 | Alarm sources/mismatch, maintenance, historian và báo cáo | 5 ngày |
+| 4 | Người dùng/audit, backup, watchdog, dependency và kiểm thử tích hợp | 5 ngày |
+| 5 | Hardening, capacity test, tài liệu, regression và Release Candidate | 5 ngày |
+| SAT/UAT | Cài đặt, chạy ổn định 72 giờ, đào tạo và nghiệm thu | 5 ngày |
 
 Ước lượng tổng:
 
-- MVP: 7–10 ngày làm việc.
-- Bản vận hành đầy đủ: 15–20 ngày làm việc, tương đương khoảng 3–4 tuần.
+- Prototype/MVP nội bộ: 10–12 ngày làm việc, chưa đủ điều kiện triển khai production.
+- Bản vận hành đầy đủ: 25 ngày phát triển + 5 ngày SAT/UAT, tương đương khoảng 6 tuần khi M0 đã hoàn tất.
+- Nếu tách acquisition thành Windows Service: cộng 3–5 ngày phát triển và kiểm thử installer/recovery.
+- Với PostgreSQL, ước lượng giả định server/service, tài khoản, firewall/TLS và quyền backup đã sẵn sàng trước ngày phát triển đầu tiên; nếu chưa sẵn sàng, cộng 1–3 ngày kỹ thuật và toàn bộ thời gian chờ IT.
 - Nếu thiếu register map hoặc chưa có thiết bị thật: cộng thêm 3–7 ngày làm việc.
 - Nếu bổ sung ghi SV hoặc giám sát từ xa: cộng thêm khoảng 1–2 tuần tùy yêu cầu bảo mật và phê duyệt IT.
 
-AI giúp rút ngắn việc tạo mã nguồn, UI, database, test và tài liệu. AI không thay thế được kiểm thử RS485, xác nhận register map, kiểm tra tín hiệu thực tế và UAT với người vận hành.
+AI giúp rút ngắn việc tạo mã nguồn, UI, database, test và tài liệu. AI không thay thế được kiểm thử RS485, xác nhận register map, kiểm tra controller/alarm thực tế, phê duyệt IT/license và UAT với người vận hành.
 
 ## 17. Rủi ro project
 
@@ -588,11 +742,19 @@ AI giúp rút ngắn việc tạo mã nguồn, UI, database, test và tài liệ
 | Không có thiết bị thật để kiểm thử | Cao | Dùng simulator trong phát triển, bắt buộc test thật trước nghiệm thu |
 | Trùng địa chỉ Modbus | Cao | Kiểm tra cấu hình và validate trong phần mềm |
 | Nhiễu hoặc timeout RS485 | Cao | Retry, reconnect, log lỗi và phối hợp kiểm tra hệ thống cáp |
+| Đọc sai signed/scale/register | Cao | Register map có nguồn, test vector giá trị âm/decimal/sensor error và đối chiếu controller thật |
+| Một thiết bị Offline làm chậm toàn tuyến | Cao | Retry giới hạn, offline backoff/probe và đo thời gian quét 21/40 thiết bị |
+| Controller alarm khác SoftwareAlarm | Cao | Lưu riêng nguồn alarm, xác nhận AL1/AL2 và cảnh báo AlarmMismatch |
 | Phạm vi thay đổi từ 21 lên 40 tank | Trung bình | Thiết kế multi-connection ngay từ đầu |
 | Ngưỡng alarm chưa được phê duyệt | Cao | Chủ quản công nghệ/EHS xác nhận trước UAT |
 | Yêu cầu remote access phát sinh muộn | Trung bình | Tách thành giai đoạn 2 và thực hiện đánh giá bảo mật |
-| Database tăng nhanh | Trung bình | Cấu hình chu kỳ lưu, retention, index và backup |
+| Database tăng nhanh | Trung bình | Partition theo thời gian, retention, index, theo dõi dung lượng và backup |
+| PostgreSQL service dừng hoặc mất kết nối mạng | Cao | Health check, reconnect có backoff, cảnh báo rõ và hàng đợi bền vững tối thiểu 24 giờ |
+| Lộ mật khẩu database | Cao | Tài khoản quyền tối thiểu, DPAPI/Credential Manager, không log connection string và xoay vòng mật khẩu |
 | Máy tính bị tắt hoặc Windows Update | Trung bình | Auto-start, giám sát ứng dụng và thống nhất chính sách IT |
+| Watchdog restart lặp vô hạn | Cao | Giới hạn số lần, exponential backoff, health event và yêu cầu can thiệp sau ngưỡng |
+| Audit không xác định được người thao tác | Cao | Cấm tài khoản dùng chung, quick switch/Windows identity và session timeout |
+| Dependency/license không được phê duyệt | Trung bình | Review sớm, CSV bắt buộc, khóa version và bàn giao SBOM/dependency register |
 | Thay đổi SV không được kiểm soát | Cao | Phiên bản đầu read-only; nếu mở ghi phải có phân quyền và audit |
 
 ## 18. Các quyết định cần xác nhận
@@ -602,26 +764,67 @@ AI giúp rút ngắn việc tạo mã nguồn, UI, database, test và tài liệ
 - [ ] Controller có RS485 hay chỉ có 4-20 mA.
 - [ ] Có bao nhiêu tuyến RS485 và COM port/gateway.
 - [ ] Register map chính thức đã được cung cấp.
+- [ ] Cấu hình AL1/AL2, sensor error, signed/scale/decimal/đơn vị đã được xác nhận trên controller thật.
+- [ ] Kết quả spike block read/single read đã xác định chiến lược polling và fallback.
 - [ ] Có cho phép ghi SV từ phần mềm.
 - [ ] Ngưỡng High/Low của từng tank đã được phê duyệt.
 - [ ] Chu kỳ polling.
 - [ ] Chu kỳ lưu và thời hạn lưu dữ liệu.
+- [ ] PostgreSQL chạy cục bộ trên máy giám sát hay trên máy chủ tập trung.
+- [ ] Phiên bản PostgreSQL, cổng kết nối, TLS, firewall và tài khoản dịch vụ đã được IT phê duyệt.
+- [ ] Vị trí lưu backup, lịch backup, thời hạn giữ backup và người chịu trách nhiệm kiểm tra restore.
 - [ ] Yêu cầu file báo cáo.
-- [ ] Có cần tài khoản người dùng hay chỉ mật khẩu quản trị.
+- [ ] Cơ chế tài khoản ứng dụng/Windows identity, PIN, timeout phiên và quy trình cấp/thu hồi tài khoản đã được IT phê duyệt.
+- [ ] Cơ chế định danh Operator là tài khoản ứng dụng + PIN hay Windows identity.
+- [ ] Khoảng reminder alarm, timeout phiên người dùng và quy tắc Maintenance Mode.
+- [ ] Phiên bản 1 dùng WinForms + watchdog hay bắt buộc Windows Service chạy khi chưa đăng nhập.
+- [ ] Danh sách dependency và license đã được IT/pháp chế chấp thuận; Excel có thuộc phạm vi P1 hay không.
 - [ ] Có cần chạy toàn màn hình và khóa thao tác ngoài ứng dụng.
 - [ ] Có cần giám sát từ xa trong giai đoạn sau.
 - [ ] Máy tính, Windows và chính sách cài đặt đã được IT xác nhận.
 - [ ] Người đại diện nghiệm thu và quy trình UAT đã được xác định.
 
-## 19. Nguyên tắc quản lý thay đổi
+## 19. Mức ưu tiên và truy vết
+
+### P0 — phải chốt trước hoặc trong tuần đầu, không được phát hành nếu thiếu
+
+- Register map, signed/scale/decimal/sensor error và cấu hình AL1/AL2 có bằng chứng.
+- Spike block read/single read, đo throughput và chiến lược offline backoff.
+- Mô hình nguồn alarm và AlarmMismatch.
+- PostgreSQL, durable queue, UTC, backup/restore và quyền tối thiểu.
+- Ma trận truy vết `FR/NFR → task → test → bằng chứng`.
+- M0 hoàn thành trước khi bắt đầu 25 ngày phát triển.
+- Git hygiene: tài liệu riêng tư, secret và generated files không được đưa vào commit mới.
+- Quyết định WinForms watchdog hay Windows Service.
+
+### P1 — bắt buộc cho bản production trong phạm vi phiên bản 1
+
+- Maintenance Mode có thời hạn và audit.
+- Alarm reminder không tạo sự kiện trùng.
+- Nhận diện đúng Operator, quick switch và session timeout.
+- Partition/index/capacity test 12 tháng/40 tank.
+- Review dependency/license, CSV bắt buộc và Excel có điều kiện.
+- Watchdog, heartbeat, application health và gói chẩn đoán.
+
+### P2 — giai đoạn sau hoặc change request
+
+- Excel nâng cao nếu chưa được phê duyệt trong P1.
+- Remote access, email/SMS/Teams/Zalo notification.
+- Ghi SV, điều khiển/liên động từ phần mềm.
+- MES/SCADA, web/mobile, high availability và Windows Service nếu phát sinh yêu cầu vận hành mới.
+
+Ma trận chi tiết được quản lý tại [Traceability Matrix SEMV](./Traceability-Matrix-SEMV.md). Tài liệu yêu cầu này là nguồn chuẩn cho FR/NFR và Definition of Done; lộ trình chỉ tham chiếu, không được tự thay đổi tiêu chí nghiệm thu.
+
+## 20. Nguyên tắc quản lý thay đổi
 
 - Yêu cầu mới sau khi chốt phạm vi phải được ghi thành change request.
 - Change request phải mô tả mục tiêu, mức ưu tiên, tác động đến dữ liệu, UI, thiết bị và bảo mật.
 - Các nội dung như remote access, ghi SV, tích hợp hệ thống ngoài hoặc thay đổi database trung tâm được xem là thay đổi phạm vi đáng kể.
 - Tiến độ chỉ được chốt chính thức sau khi hoàn thành các mục trong phần Điều kiện đầu vào.
+- Mọi thay đổi P0/P1 phải cập nhật đồng thời tài liệu yêu cầu, lộ trình, ma trận truy vết và test case liên quan.
 
-## 20. Kết luận
+## 21. Kết luận
 
 Phiên bản 1 nên tập trung vào giám sát ổn định tại chỗ: đọc 21 controller RS485, dashboard, cảnh báo, lịch sử, biểu đồ, tra cứu, export, backup và chẩn đoán kết nối. Kiến trúc phải hỗ trợ tối thiểu 40 tank và nhiều tuyến RS485 ngay từ đầu.
 
-Điều kiện quan trọng nhất để đảm bảo tiến độ 3–4 tuần là có register map chính thức, controller RS485 thật, bộ chuyển đổi sử dụng thực tế và yêu cầu alarm được phê duyệt trước khi bắt đầu kiểm thử tích hợp.
+Điều kiện quan trọng nhất để đảm bảo kế hoạch 25 ngày phát triển + 5 ngày SAT/UAT là hoàn thành M0 trước ngày phát triển đầu tiên: register map chính thức, controller RS485 thật, bộ chuyển đổi sử dụng thực tế, cấu hình nguồn alarm, PostgreSQL/quyền IT và dependency/license đã được xác nhận.

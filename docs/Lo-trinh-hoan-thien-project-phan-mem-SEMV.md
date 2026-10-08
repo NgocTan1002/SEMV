@@ -9,14 +9,16 @@
 | Nền tảng đề xuất | C# và .NET 10 LTS, Windows x64 |
 | Phạm vi phiên bản 1 | Giám sát 21 tank, mở rộng được đến tối thiểu 40 tank |
 | Giao tiếp | RS485 Modbus RTU với Autonics TK Series |
-| Cơ sở dữ liệu đề xuất | SQLite cho một máy giám sát |
-| Thời gian phát triển mục tiêu | 20 ngày làm việc |
-| Dự phòng hiện trường | 5 ngày làm việc |
-| Tổng thời gian kế hoạch | 4 tuần phát triển và 1 tuần dự phòng |
+| Cơ sở dữ liệu | PostgreSQL; mặc định có thể chạy local dưới dạng Windows Service, hỗ trợ chuyển sang máy chủ tập trung |
+| Thời gian phát triển mục tiêu | 25 ngày làm việc, chỉ bắt đầu sau khi M0 hoàn tất |
+| SAT/UAT hiện trường | 5 ngày làm việc |
+| Tổng thời gian kế hoạch | 5 tuần phát triển và 1 tuần SAT/UAT |
 | Phương thức thực hiện | Một lập trình viên WinForms có AI hỗ trợ, phối hợp kỹ thuật tự động hóa và người vận hành |
 | Ngày lập kế hoạch | 08/10/2026 |
 
-Tài liệu này triển khai chi tiết từ [Yêu cầu project phần mềm giám sát nhiệt độ hóa chất SEMV](./Yeu-cau-project-phan-mem-giam-sat-hoa-chat-SEMV.md).
+M0 là giai đoạn chuẩn bị ngoài 25 ngày phát triển. Đồng hồ tiến độ chỉ bắt đầu khi register map, controller test, danh sách tank/ngưỡng, PostgreSQL, quyền IT, quyết định watchdog và dependency/license P0 đã sẵn sàng. Thời gian chờ các đầu vào này không được che giấu trong tuần SAT/UAT.
+
+Tài liệu này triển khai công việc từ [Yêu cầu project phần mềm giám sát nhiệt độ hóa chất SEMV](./Yeu-cau-project-phan-mem-giam-sat-hoa-chat-SEMV.md) và cập nhật bằng chứng tại [Traceability Matrix SEMV](./Traceability-Matrix-SEMV.md). Tài liệu yêu cầu là nguồn chuẩn cho FR/NFR và Definition of Done; lộ trình không lặp lại hoặc tự thay đổi tiêu chí đó.
 
 ## 2. Mục tiêu hoàn thành
 
@@ -26,13 +28,16 @@ Sau khi kết thúc lộ trình, project phải có một bản phần mềm Win
 - Đọc và hiển thị nhiệt độ PV của 21 tank theo thời gian thực.
 - Đọc SV và trạng thái alarm nếu register map/model thiết bị hỗ trợ.
 - Nhận biết High Alarm, Low Alarm, Sensor Error và Communication Error.
+- Phân biệt SoftwareAlarm, ControllerAlarm, LocalHardwareAlarm và AlarmMismatch.
 - Lưu lịch sử nhiệt độ, alarm và lỗi truyền thông.
 - Hiển thị biểu đồ, tra cứu và xuất dữ liệu.
 - Quản lý cấu hình tank, kết nối và ngưỡng cảnh báo.
 - Phân quyền người dùng cơ bản, audit log, backup và restore.
+- Maintenance Mode có thời hạn, alarm reminder không tạo bản ghi trùng và nhận diện đúng người acknowledge.
 - Tự động kết nối lại sau sự cố và tiếp tục hoạt động khi một thiết bị bị lỗi.
 - Có installer, tài liệu vận hành, mã nguồn và biên bản UAT.
 - Kiến trúc hỗ trợ tối thiểu 40 tank và nhiều tuyến RS485.
+- Có watchdog/heartbeat, durable queue 24 giờ và capacity test PostgreSQL 12 tháng/40 tank.
 
 ## 3. Hiện trạng ban đầu
 
@@ -69,7 +74,7 @@ Sau khi kết thúc lộ trình, project phải có một bản phần mềm Win
 
 Chương trình mẫu chỉ được dùng để đối chiếu giao thức và register. Phần mềm production phải được xây dựng trong solution mới.
 
-## 4. Điều kiện bắt đầu project
+## 4. M0 — điều kiện trước khi bắt đầu 25 ngày phát triển
 
 Một công việc chỉ được tính vào tiến độ chính thức sau khi các điều kiện liên quan đã sẵn sàng.
 
@@ -79,10 +84,13 @@ Một công việc chỉ được tính vào tiến độ chính thức sau khi 
 - [ ] Xác nhận không dùng TK4W-R4RN nếu không có thiết bị chuyển đổi 4-20 mA sang hệ thống số.
 - [ ] Có communication manual hoặc register map chính thức.
 - [ ] Xác định register PV, SV, alarm, sensor error và vị trí dấu thập phân.
+- [ ] Bảng register ghi đủ function code, address, length, signed/unsigned, scale, decimal, unit, bit mask, giá trị lỗi và nguồn tài liệu.
+- [ ] Cấu hình AL1/AL2 đã được xác nhận; không mặc định AL1 là High và AL2 là Low.
 - [ ] Có ít nhất một controller TK Series RS485 thật.
 - [ ] Có USB-RS485 hoặc gateway sẽ sử dụng tại hiện trường.
 - [ ] Xác nhận cấu hình 9.600 bps, parity, stop bit, response waiting time và địa chỉ.
 - [ ] Xác nhận số tuyến RS485 và số thiết bị trên từng tuyến.
+- [ ] Có test vector cho giá trị âm, decimal, sensor error, CRC lỗi, frame thiếu và Modbus exception.
 
 ### 4.2 Điều kiện nghiệp vụ bắt buộc
 
@@ -94,6 +102,9 @@ Một công việc chỉ được tính vào tiến độ chính thức sau khi 
 - [ ] Chốt thời hạn lưu dữ liệu.
 - [ ] Chốt quyền ghi SV: read-only hoặc cho phép ghi.
 - [ ] Chốt định dạng báo cáo và dữ liệu cần xuất.
+- [ ] CSV được xác nhận là bắt buộc; Excel chỉ là P1 khi giấy phép thư viện được duyệt.
+- [ ] Chốt cơ chế Operator: tài khoản ứng dụng + PIN hoặc Windows identity; không dùng tài khoản chung nếu cần audit.
+- [ ] Chốt alarm reminder, Maintenance Mode và quy tắc AlarmMismatch.
 - [ ] Xác định người đại diện nghiệm thu UAT.
 
 ### 4.3 Điều kiện hạ tầng
@@ -103,7 +114,15 @@ Một công việc chỉ được tính vào tiến độ chính thức sau khi 
 - [ ] Có quyền cài đặt phần mềm và driver thiết bị.
 - [ ] IT Samsung xác nhận chính sách antivirus, Windows Update và tự khởi động ứng dụng.
 - [ ] Đồng hồ hệ thống được đồng bộ đúng múi giờ vận hành.
-- [ ] Có thư mục được phép lưu database, log, backup và file export.
+- [ ] Chốt PostgreSQL chạy trên máy giám sát hay máy chủ tập trung.
+- [ ] Chốt phiên bản PostgreSQL, host, port, database name và phương thức TLS.
+- [ ] Có tài khoản dịch vụ PostgreSQL theo nguyên tắc quyền tối thiểu; không dùng tài khoản `postgres` cho ứng dụng.
+- [ ] Firewall/`pg_hba.conf` chỉ cho phép đúng máy ứng dụng kết nối và đã được IT phê duyệt.
+- [ ] Có nơi được phép lưu hàng đợi cục bộ, log, backup và file export.
+- [ ] Chốt lịch backup, thời hạn lưu backup, dung lượng dự kiến và người chịu trách nhiệm kiểm tra restore.
+- [ ] Chốt phiên bản 1 dùng WinForms background service + Task Scheduler/watchdog; nếu yêu cầu chạy khi chưa đăng nhập thì phê duyệt thêm phạm vi Windows Service.
+- [ ] Hoàn tất review dependency/license cho Npgsql, Dapper/repository, Modbus, chart, CSV/Excel, logging và installer.
+- [ ] `.gitignore` đã loại trừ Office/PDF riêng tư, secret, `.vs`, `bin`, `obj`, log, backup, export và runtime data; generated files cũ đã được bỏ khỏi Git index.
 
 ## 5. Nguyên tắc quản lý tiến độ
 
@@ -145,76 +164,68 @@ Một task chỉ được đánh dấu Done khi:
 
 | Mốc | Nội dung | Thời điểm mục tiêu | Điều kiện qua mốc |
 |---|---|---:|---|
-| M0 | Chốt yêu cầu và đầu vào | Cuối ngày 2 | Tất cả quyết định P0 được xác nhận |
-| M1 | Driver Modbus hoạt động | Cuối ngày 5 | Đọc đúng PV/SV từ controller hoặc simulator chuẩn |
-| M2 | Nền tảng và database hoàn thành | Cuối ngày 7 | Solution, logging, cấu hình và SQLite hoạt động |
-| M3 | Dashboard thời gian thực | Cuối ngày 10 | Hiển thị 21 tank và xử lý trạng thái kết nối |
-| M4 | Alarm và historian hoàn thành | Cuối ngày 14 | Alarm không trùng, dữ liệu được lưu đúng |
-| M5 | Tra cứu, báo cáo và quản trị | Cuối ngày 16 | Trend, export, user, audit và backup hoạt động |
-| M6 | Hoàn thành kiểm thử tích hợp | Cuối ngày 18 | Các test lỗi truyền thông và dữ liệu đạt yêu cầu |
-| M7 | Release Candidate | Cuối ngày 20 | Installer, tài liệu và UAT nội bộ hoàn thành |
-| M8 | Nghiệm thu hiện trường | Tuần dự phòng | Chạy 72 giờ và UAT được ký xác nhận |
+| M0 | Chốt yêu cầu và đầu vào | Trước ngày phát triển 1 | Toàn bộ checklist M0 đạt hoặc có phê duyệt blocker/change request |
+| M1 | Driver Modbus đã xác nhận | Cuối ngày 5 | Signed/scale đúng; block/single read và offline backoff đạt test controller/simulator |
+| M2 | Nền tảng dữ liệu và polling | Cuối ngày 10 | PostgreSQL, queue 24 giờ, multi-bus polling và dashboard 21 tank hoạt động |
+| M3 | Alarm và historian | Cuối ngày 15 | Alarm sources/mismatch, maintenance, reminder và historian không trùng |
+| M4 | Quản trị và độ bền | Cuối ngày 20 | User/audit, backup/restore, watchdog, dependency và fault injection đạt |
+| M5 | Release Candidate | Cuối ngày 25 | Capacity/regression/soak nội bộ, installer, tài liệu và traceability hoàn thành |
+| M6 | Nghiệm thu hiện trường | Cuối ngày 30 | SAT, chạy 72 giờ, đào tạo và UAT được ký xác nhận |
 
-## 7. Lộ trình chi tiết 20 ngày làm việc
+## 7. Lộ trình chi tiết 25 ngày làm việc
 
-### Tuần 1 Xác nhận giao thức và xây dựng driver
+### Tuần 1 Driver Modbus và bằng chứng giao thức
 
-#### Ngày 1 Chốt phạm vi phiên bản 1
+#### Ngày 1 Solution, register catalog và test vector
 
 | Mã | Công việc | Đầu ra | Điều kiện hoàn thành |
 |---|---|---|---|
-| R01 | Rà soát tài liệu yêu cầu | Danh sách chức năng P0, P1, P2 | Không còn chức năng P0 mô tả mơ hồ |
-| R02 | Chốt số lượng tank | Danh sách 21 tank | Mỗi tank có mã, tên, hóa chất và vị trí |
-| R03 | Chốt phạm vi read/write | Biên bản quyết định | Xác định rõ chỉ đọc hay được ghi SV |
-| R04 | Chốt ngưỡng alarm | Bảng ngưỡng | Người phụ trách công nghệ/EHS xác nhận |
-| R05 | Chốt topology RS485 | Sơ đồ một hoặc nhiều tuyến | Có số thiết bị và địa chỉ trên từng tuyến |
+| A01 | Tạo solution .NET 10 nhiều lớp | Solution build Debug/Release | Domain/Application/Infrastructure/WinForms không phụ thuộc ngược |
+| A02 | Tạo register catalog có version | Metadata theo model/firmware | Có function, address, length, signed, scale, unit, bit mask và nguồn |
+| A03 | Tạo test vector | Request/response chuẩn và lỗi | Bao phủ số âm, decimal, sensor error, CRC lỗi, frame thiếu và exception |
+| A04 | Tạo parser signed/scale | Unit tests | PV/SV âm và dấu thập phân khớp vector đã duyệt |
+| A05 | Cập nhật traceability | Dòng M1 trong matrix | Mỗi yêu cầu driver có task/test/bằng chứng dự kiến |
 
-**Cổng nghiệm thu ngày 1:** phạm vi MVP và production được tách rõ; các nội dung chưa chốt được ghi thành blocker có người phụ trách.
-
-#### Ngày 2 Xác nhận register và thiết bị
+#### Ngày 2 Serial transport và frame parser
 
 | Mã | Công việc | Đầu ra | Điều kiện hoàn thành |
 |---|---|---|---|
-| R06 | Đối chiếu manual và sample Autonics | Register map bản đầu | Có PV, SV, model, alarm và sensor error nếu hỗ trợ |
-| R07 | Xác nhận scale dữ liệu | Quy tắc chuyển đổi | Đọc đúng số âm và vị trí thập phân |
-| R08 | Xác nhận thông số serial | Connection profile | Baud, parity, stop bits, timeout và address rõ ràng |
-| R09 | Kiểm tra controller thật | Biên bản kết nối | Controller phản hồi đúng Modbus RTU |
-| R10 | Tạo test vector CRC/frame | Bộ dữ liệu test | Có request/response hợp lệ và frame lỗi |
+| C01 | SerialPort transport bất đồng bộ | Transport layer | Không gọi blocking trên UI thread |
+| C02 | Request queue từng tuyến | Một request in-flight/bus | Không chồng frame trên RS485 |
+| C03 | Frame accumulator | Parser theo độ dài/CRC | Nhận đúng response bị chia nhỏ hoặc đến chậm |
+| C04 | Timeout/Modbus exception | Error taxonomy | Timeout, bad CRC, exception và cancellation được phân loại |
+| C05 | Log kỹ thuật có giới hạn | Diagnostic log | Không log secret, raw frame mặc định tắt và có rotation |
 
-**Cổng M0:** register chưa được xác nhận thì phần driver chỉ được phát triển với simulator, không được coi là nghiệm thu thiết bị thật.
-
-#### Ngày 3 Tạo solution và khung driver
+#### Ngày 3 Simulator và fault injection
 
 | Mã | Công việc | Đầu ra | Điều kiện hoàn thành |
 |---|---|---|---|
-| A01 | Tạo solution .NET 10 | Solution nhiều project | Build Debug và Release thành công |
-| A02 | Tạo domain model | Tank, Device, Connection, Sample, Alarm | Không phụ thuộc trực tiếp vào WinForms |
-| A03 | Tạo Modbus request builder | Frame request | CRC và byte order đúng test vector |
-| A04 | Tạo response parser | Parsed response | Phát hiện CRC lỗi, exception và frame thiếu |
-| A05 | Tạo register catalog | Register constants/metadata | Không hard-code register trong Form |
+| C06 | Simulator 21–40 địa chỉ | Virtual devices | PV/SV/alarm thay đổi được theo kịch bản |
+| C07 | Fault injection | Bộ lỗi mô phỏng | Có no response, delay, bad CRC, fragmented frame và exception |
+| C08 | Giá trị biên | Bộ dữ liệu | Có negative value, sensor error, min/max và recovery |
+| C09 | Multi-bus simulation | Ít nhất hai tuyến | Một tuyến lỗi không ảnh hưởng tuyến còn lại |
 
-#### Ngày 4 Serial transport và simulator
-
-| Mã | Công việc | Đầu ra | Điều kiện hoàn thành |
-|---|---|---|---|
-| C01 | Xây dựng SerialPort transport | Async transport | Không khóa UI thread |
-| C02 | Xây dựng request queue | Một request tại một thời điểm mỗi tuyến | Không chồng frame trên RS485 |
-| C03 | Xử lý timeout và retry | Retry policy | Timeout được phân loại và log đúng |
-| C04 | Xử lý frame tích lũy | Frame reader | Nhận được response bị chia thành nhiều lần đọc |
-| C05 | Tạo simulator | Virtual devices | Mô phỏng 21–40 địa chỉ, PV, SV và lỗi |
-
-#### Ngày 5 Kiểm thử driver
+#### Ngày 4 Polling strategy và throughput spike
 
 | Mã | Công việc | Đầu ra | Điều kiện hoàn thành |
 |---|---|---|---|
-| C06 | Đọc model name | Kết quả model | Khớp thiết bị thật hoặc mẫu chuẩn |
-| C07 | Đọc PV | Giá trị PV | Khớp màn hình controller trong độ phân giải hiển thị |
-| C08 | Đọc SV | Giá trị SV | Khớp màn hình controller |
-| C09 | Đọc trạng thái alarm | Alarm status | Khớp trạng thái thực hoặc simulator |
-| C10 | Test mất kết nối | Kết quả timeout/reconnect | Không crash và kết nối lại được |
-| C11 | Unit test driver | Bộ test tự động | Tất cả test CRC/parser/state chạy thành công |
+| C10 | Single-register read | Kết quả benchmark | Đọc đúng Model/PV/SV/Status và đo chu kỳ 21 thiết bị |
+| C11 | Block read `0x03E8–0x03EE` | Kết quả benchmark | Chỉ đạt khi manual/controller cho phép và ánh xạ đúng register |
+| C12 | Chọn strategy + fallback | Biên bản kỹ thuật | Có số liệu đúng/sai/thời gian; fallback single read đã test |
+| C13 | Online/offline scheduler | Backoff/probe | Online 1–2 giây; Offline probe 10–30 giây, retry giới hạn |
+| C14 | Bus isolation | Scheduler nhiều tuyến | Thiết bị/tuyến Offline không chặn thiết bị/tuyến Online |
 
-**Cổng M1:** driver phải chạy liên tục tối thiểu 4 giờ với simulator hoặc controller thật mà không treo và không rò rỉ request.
+#### Ngày 5 Kiểm thử driver trên controller thật
+
+| Mã | Công việc | Đầu ra | Điều kiện hoàn thành |
+|---|---|---|---|
+| C15 | Đọc Model/PV/SV/Status | Báo cáo đối chiếu | Khớp controller và register map được ký xác nhận |
+| C16 | Test AL1/AL2/sensor error | Bảng ý nghĩa bit | Không suy đoán High/Low; ghi rõ cấu hình controller |
+| C17 | Test giá trị âm/decimal | Bằng chứng ảnh/log | Không bị parse unsigned hoặc sai scale |
+| C18 | Test timeout/reconnect/backoff | Báo cáo tải bus | Không crash, không retry dồn dập và tự phục hồi |
+| C19 | Soak driver 4 giờ | Test report | Không treo, leak request hoặc trôi mapping thiết bị |
+
+**Cổng M1:** không qua cổng nếu chưa có bằng chứng register/scale trên controller thật hoặc chưa có quyết định rõ phần nào tạm nghiệm thu bằng simulator.
 
 ### Tuần 2 Nền tảng dữ liệu và dashboard
 
@@ -222,10 +233,14 @@ Một task chỉ được đánh dấu Done khi:
 
 | Mã | Công việc | Đầu ra | Điều kiện hoàn thành |
 |---|---|---|---|
-| D01 | Thiết kế schema SQLite | Schema/migration | Có bảng Connections, Devices, Tanks, Samples, Alarms và AuditLogs |
-| D02 | Repository và transaction | Persistence layer | Insert/query hoạt động và có xử lý lỗi |
-| D03 | App configuration | File/database settings | Cấu hình không hard-code trong executable |
-| D04 | Logging | Log file xoay vòng | Có mức Info, Warning, Error và không log mật khẩu |
+| D01 | Thiết kế schema PostgreSQL | Schema/migration | Có bảng Connections, Devices, Tanks, Samples, Alarms và AuditLogs; timestamp dùng `timestamptz` UTC |
+| D02 | Migration/versioning | Bộ migration có số phiên bản | Tạo database trắng thành công; ứng dụng phát hiện schema sai phiên bản |
+| D03 | Repository, transaction và pooling | Persistence layer dùng Npgsql | Insert/query hoạt động; dùng transaction ngắn và không mở connection riêng cho từng tank |
+| D04 | Partition và index | Partition/index scripts | Samples phân vùng theo thời gian; có index `TankId + Timestamp` phục vụ tra cứu |
+| D05 | Database role | Script role/quyền | Ứng dụng không dùng superuser và không có quyền ngoài phạm vi cần thiết |
+| D06 | App configuration | File/database settings | Không hard-code host, port hoặc mật khẩu trong executable; secret được bảo vệ trên Windows |
+| D07 | Logging và health check | Log xoay vòng/trạng thái DB | Có Info, Warning, Error; không log mật khẩu/connection string và hiển thị được trạng thái database |
+| D08 | Database outage queue | Append-only/versioned local queue | Giữ tối thiểu 24 giờ, checksum/giới hạn dung lượng và replay idempotent |
 
 #### Ngày 7 Connection manager và polling service
 
@@ -236,8 +251,9 @@ Một task chỉ được đánh dấu Done khi:
 | P03 | Device state machine | Online/Offline/Error | Chuyển trạng thái nhất quán |
 | P04 | Retry và reconnect | Recovery mechanism | Tự phục hồi khi kết nối trở lại |
 | P05 | Data quality | Good/Bad/Unknown | Không coi dữ liệu cũ là dữ liệu mới |
+| P06 | Durable database queue | Hàng đợi bền vững cục bộ | PostgreSQL mất kết nối không dừng polling; giữ tối thiểu 24 giờ và ghi bù không trùng |
 
-**Cổng M2:** khởi động lại ứng dụng phải phục hồi được cấu hình và bắt đầu polling mà không phải nhập lại toàn bộ hệ thống.
+**Checkpoint nền tảng:** khởi động lại ứng dụng phải phục hồi được cấu hình và bắt đầu polling mà không phải nhập lại toàn bộ hệ thống; cổng M2 được đánh giá cuối ngày 10 sau khi dashboard/queue hoàn thành.
 
 #### Ngày 8 Thiết kế giao diện tổng thể
 
@@ -248,6 +264,7 @@ Một task chỉ được đánh dấu Done khi:
 | U03 | Layout 21 tank | Dashboard layout | Đọc rõ trên màn hình 1920 x 1080 |
 | U04 | Layout mở rộng 40 tank | Group/paging | Không phải sửa kiến trúc UI khi thêm tank |
 | U05 | Theme trạng thái | Màu và icon | Normal, High, Low, Sensor Error, Offline phân biệt rõ |
+| U05A | Health banner | Trạng thái hệ thống | Hiển thị rõ Database Degraded, queue backlog, bus lỗi và Maintenance Mode |
 
 #### Ngày 9 Kết nối UI với dữ liệu thời gian thực
 
@@ -267,8 +284,9 @@ Một task chỉ được đánh dấu Done khi:
 | U12 | Test 40 thiết bị/two buses | Báo cáo mở rộng | Hai tuyến hoạt động độc lập |
 | U13 | Test resize/DPI | Báo cáo UI | Không cắt chữ, chồng nội dung hoặc mất nút |
 | U14 | Test timeout hàng loạt | Báo cáo lỗi | UI không treo khi nhiều thiết bị offline |
+| U15 | Test offline backoff | Báo cáo chu kỳ quét | Thiết bị Online vẫn đạt chu kỳ khi nhiều thiết bị Offline |
 
-**Cổng M3:** dashboard phải hiển thị đúng 21 tank và duy trì khả năng thao tác trong khi polling liên tục.
+**Cổng M2:** dashboard phải hiển thị đúng 21 tank, PostgreSQL/queue hoạt động và UI vẫn thao tác được khi polling hoặc database gián đoạn.
 
 ### Tuần 3 Alarm, historian và báo cáo
 
@@ -281,6 +299,8 @@ Một task chỉ được đánh dấu Done khi:
 | AL03 | Sensor Error | Rule/state | Giá trị lỗi không được lưu như PV hợp lệ |
 | AL04 | Communication Error | Rule/state | Kích hoạt sau số retry quy định |
 | AL05 | Communication Restored | Recovery event | Ghi nhận đúng một lần khi kết nối phục hồi |
+| AL05A | Alarm source model | Domain/state | Lưu riêng Software/Controller/LocalHardware, không ghi đè lẫn nhau |
+| AL05B | AlarmMismatch | Rule/state | Phát hiện nguồn không thống nhất sau delay, không suy đoán AL1/AL2 |
 
 #### Ngày 12 Alarm UI và acknowledge
 
@@ -291,6 +311,8 @@ Một task chỉ được đánh dấu Done khi:
 | AL08 | Acknowledge | Thao tác xác nhận | Không xóa điều kiện alarm đang tồn tại |
 | AL09 | Alarm history | Database records | Không tạo bản ghi lặp mỗi chu kỳ polling |
 | AL10 | Khôi phục sau restart | State recovery | Không mất hoặc nhân đôi sự kiện |
+| AL11 | Reminder chưa acknowledge | Timer/UI/sound | Nhắc lại theo cấu hình nhưng không tạo AlarmEvent mới |
+| AL12 | Operator identity | Ack audit | Acknowledge gắn đúng user hiện tại, không dùng danh tính chung |
 
 #### Ngày 13 Historian và retention
 
@@ -299,7 +321,7 @@ Một task chỉ được đánh dấu Done khi:
 | H01 | Lưu mẫu định kỳ | TemperatureSamples | Đúng tank, timestamp, PV, SV và quality |
 | H02 | Lưu theo sự kiện | Event samples | Lưu ngay khi có alarm hoặc phục hồi |
 | H03 | Retention policy | Job dọn dữ liệu | Không xóa dữ liệu ngoài chính sách |
-| H04 | Index database | Query indexes | Truy vấn theo tank và thời gian đáp ứng mục tiêu |
+| H04 | Partition/index PostgreSQL | Query plan và indexes | Truy vấn theo tank và thời gian đáp ứng mục tiêu, dọn partition không khóa hệ thống kéo dài |
 
 #### Ngày 14 Lịch sử và biểu đồ
 
@@ -308,9 +330,10 @@ Một task chỉ được đánh dấu Done khi:
 | H05 | Lịch sử nhiệt độ | Data grid | Lọc theo tank và khoảng thời gian |
 | H06 | Lịch sử alarm | Alarm grid | Lọc theo loại và trạng thái xác nhận |
 | H07 | Trend chart | Biểu đồ | Có PV, High/Low limit và khoảng mất dữ liệu |
-| H08 | Export CSV/Excel | File báo cáo | Nội dung khớp dữ liệu trên màn hình |
+| H08 | Export CSV | File báo cáo bắt buộc | Mở được không cần Excel, nội dung khớp dữ liệu trên màn hình |
+| H09 | Export Excel có điều kiện | File `.xlsx` P1 | Chỉ Done khi thư viện/license được duyệt; không chặn RC nếu CSV đạt và Excel ngoài phạm vi |
 
-**Cổng M4:** test High, Low, Sensor Error và Offline phải tạo đúng vòng đời alarm, không trùng và không mất dữ liệu.
+**Cổng giữa tuần:** High, Low, Sensor Error, Offline, source mismatch và reminder phải có vòng đời đúng, không trùng và không mất dữ liệu.
 
 #### Ngày 15 Cấu hình vận hành
 
@@ -321,8 +344,12 @@ Một task chỉ được đánh dấu Done khi:
 | CFG03 | Cấu hình threshold | Alarm settings | Validate Low nhỏ hơn High |
 | CFG04 | Cấu hình polling/storage | System settings | Giá trị ngoài phạm vi bị từ chối |
 | CFG05 | Test connection | Diagnostic action | Hiển thị kết quả rõ ràng và có log |
+| CFG06 | Maintenance Mode | UI + state + audit | Có phạm vi, lý do, user, start/end, auto-expiry và hiển thị rõ |
+| CFG07 | Maintenance policy | Suppress rules | Không xóa alarm; polling/lịch sử tiếp tục trừ khi dừng tuyến có chủ ý |
 
-### Tuần 4 Bảo mật, kiểm thử và phát hành
+**Cổng M3:** alarm sources/mismatch, maintenance, reminder, historian và CSV đáp ứng các test P0/P1 tương ứng trong traceability matrix.
+
+### Tuần 4 Bảo mật, độ bền và kiểm thử tích hợp
 
 #### Ngày 16 Người dùng, audit và backup
 
@@ -331,10 +358,13 @@ Một task chỉ được đánh dấu Done khi:
 | SEC01 | Operator/Admin roles | Phân quyền | Operator không sửa cấu hình quan trọng |
 | SEC02 | Password storage | Authentication | Không lưu mật khẩu dạng rõ |
 | SEC03 | Audit log | Nhật ký thao tác | Ghi thay đổi threshold/config/acknowledge |
-| BK01 | Backup | File backup | Tạo được khi hệ thống đang vận hành an toàn |
-| BK02 | Restore | Quy trình restore | Khôi phục được trên database kiểm thử |
+| SEC04 | Quick user switch | User + PIN/Windows identity | Đổi Operator nhanh, acknowledge gắn đúng người |
+| SEC05 | Session timeout | Auto lock | Khóa thao tác quản trị nhưng dashboard/polling vẫn chạy |
+| BK01 | Backup PostgreSQL | File do `pg_dump` tạo | Backup có schema, dữ liệu và phiên bản migration; không lộ mật khẩu trong log |
+| BK02 | Restore PostgreSQL | Quy trình `pg_restore` | Khôi phục được vào database kiểm thử riêng và ứng dụng kết nối/tra cứu bình thường |
+| BK03 | Backup schedule/retention | Lịch và chính sách lưu | Tự động chạy theo lịch, có log kết quả và cảnh báo khi thất bại |
 
-**Cổng M5:** backup phải được kiểm tra restore thực tế; chỉ tạo được file backup chưa được coi là hoàn thành.
+**Cổng backup:** backup phải được restore thực tế; chỉ tạo được file backup chưa được coi là hoàn thành.
 
 #### Ngày 17 Kiểm thử tích hợp và fault injection
 
@@ -345,8 +375,11 @@ Một task chỉ được đánh dấu Done khi:
 | T03 | CRC lỗi | Frame bị từ chối và được log đúng |
 | T04 | Response thiếu/chậm | Timeout/retry hoạt động đúng |
 | T05 | Trùng Modbus address | Phần mềm cảnh báo cấu hình |
-| T06 | Database tạm khóa | Không làm mất ổn định toàn ứng dụng |
+| T06 | PostgreSQL service restart/mất mạng | Polling tiếp tục, UI báo Degraded, dữ liệu vào queue và được ghi bù không trùng sau phục hồi |
 | T07 | Khởi động lại Windows | Ứng dụng tự chạy và tiếp tục vận hành |
+| T07A | Sai mật khẩu/hết quyền database | Không lộ secret, thông báo rõ và không retry dồn dập |
+| T07B | Maintenance auto-expiry | Kết thúc đúng hạn, hiển thị/audit đúng và không xóa alarm |
+| T07C | Alarm reminder | Nhắc lại không tạo AlarmEvent trùng |
 
 #### Ngày 18 Kiểm thử dữ liệu và hiệu năng
 
@@ -358,8 +391,9 @@ Một task chỉ được đánh dấu Done khi:
 | T11 | Export dữ liệu lớn | Không treo UI, file hợp lệ |
 | T12 | Restart recovery | Không tạo alarm hoặc sample trùng bất hợp lý |
 | T13 | So sánh PV/SV | Khớp màn hình controller |
+| T14 | Dữ liệu mô phỏng 12 tháng/40 tank | Insert, retention, partition và query đạt mục tiêu; có báo cáo dung lượng/query plan |
 
-**Cổng M6:** không còn lỗi Critical/Blocker; tất cả test P0 phải đạt.
+**Cổng kiểm thử:** không còn lỗi Critical/Blocker; tất cả test P0 trong phạm vi tuần 1–4 phải đạt.
 
 #### Ngày 19 Đóng gói và tài liệu
 
@@ -371,8 +405,11 @@ Một task chỉ được đánh dấu Done khi:
 | DEP04 | Tài liệu vận hành | User guide | Operator thực hiện được thao tác chính |
 | DEP05 | Tài liệu xử lý lỗi | Troubleshooting guide | Có hướng dẫn COM, offline, backup và log |
 | DEP06 | Release notes | Danh sách thay đổi | Có version, ngày phát hành và known issues |
+| DEP07 | Dependency/license review | SBOM/dependency register | Có tên/version/source/license/trạng thái duyệt; không còn Critical/High chưa xử lý |
+| DEP08 | Git hygiene | `.gitignore` và Git index sạch | Không track Office/PDF riêng tư, secret, `.vs`, `bin`, `obj`, executable/log/runtime data |
+| DEP09 | Watchdog/Task Scheduler | Startup/recovery configuration | Heartbeat, restart limit, backoff và log nguyên nhân hoạt động |
 
-#### Ngày 20 UAT nội bộ và Release Candidate
+#### Ngày 20 UAT nội bộ và Feature Complete
 
 | Mã | Công việc | Điều kiện hoàn thành |
 |---|---|---|
@@ -380,13 +417,62 @@ Một task chỉ được đánh dấu Done khi:
 | UAT02 | Chạy bộ test nghiệm thu | Tất cả P0 đạt, không còn blocker |
 | UAT03 | Ghi nhận phản hồi | Mọi thay đổi được phân loại bug hoặc change request |
 | UAT04 | Khóa phạm vi release | Không thêm chức năng mới vào RC |
-| UAT05 | Tạo Release Candidate | Có installer, source, tài liệu và checksum |
+| UAT05 | Khóa Feature Complete | Không thêm tính năng mới; danh sách bug/hardening tuần 5 rõ ràng |
 
-**Cổng M7:** Release Candidate chỉ được phát hành hiện trường khi không còn lỗi Critical hoặc High ảnh hưởng vận hành.
+**Cổng M4:** chức năng P0/P1 đã hoàn thành; backup/restore, watchdog, user identity, dependency review và fault injection đạt. Tuần 5 chỉ hardening, regression, tài liệu và sửa bug.
 
-## 8. Tuần dự phòng và nghiệm thu hiện trường
+### Tuần 5 Hardening và Release Candidate
 
-### Ngày 21–22 Cài đặt và SAT
+#### Ngày 21 PostgreSQL durability và capacity
+
+| Mã | Công việc | Đầu ra | Điều kiện hoàn thành |
+|---|---|---|---|
+| HD01 | Nạp dữ liệu 12 tháng/40 tank | Dataset/report | Dung lượng, insert rate và query plan được ghi nhận |
+| HD02 | Query/partition/retention | Performance report | Query một tháng/tank dưới 3 giây trên máy chuẩn; dọn partition đúng chính sách |
+| HD03 | Queue 24 giờ và replay | Recovery report | Restart/mất mạng không mất dữ liệu trong dung lượng thiết kế, không ghi trùng |
+| HD04 | Backup/restore rehearsal | Database kiểm thử | `pg_dump`/`pg_restore` hoàn chỉnh và ứng dụng chạy trên bản restore |
+
+#### Ngày 22 Alarm, maintenance và identity regression
+
+| Mã | Công việc | Đầu ra | Điều kiện hoàn thành |
+|---|---|---|---|
+| HD05 | Alarm source/mismatch | Regression report | Software/Controller/Hardware/Mismatch độc lập và đúng mapping |
+| HD06 | Reminder/acknowledge | Regression report | Không trùng event; lưu đúng Operator và thời gian |
+| HD07 | Maintenance Mode | Regression report | Reason/user/start/end/expiry/audit đầy đủ, UI luôn dễ nhận biết |
+| HD08 | Restart recovery | Regression report | Không nhân đôi active alarm hoặc mất trạng thái quan trọng |
+
+#### Ngày 23 Installer, watchdog và nâng cấp
+
+| Mã | Công việc | Đầu ra | Điều kiện hoàn thành |
+|---|---|---|---|
+| HD09 | Cài mới/nâng cấp/gỡ cài đặt | Installer report | Không cần Visual Studio; không mất config/database |
+| HD10 | Task Scheduler/watchdog | Recovery report | Startup, heartbeat, restart limit/backoff và log đúng |
+| HD11 | Máy không đăng nhập/reboot | Quyết định vận hành | Hành vi đúng phạm vi; nếu cần acquisition không login thì mở change request Windows Service |
+| HD12 | Security/dependency scan | Báo cáo/SBOM | Không còn secret, dependency Critical/High hoặc license chưa xử lý |
+
+#### Ngày 24 Full regression và bắt đầu soak test
+
+| Mã | Công việc | Đầu ra | Điều kiện hoàn thành |
+|---|---|---|---|
+| RC01 | Chạy toàn bộ test P0/P1 | Test report | Tất cả test bắt buộc đạt, không còn Critical/High |
+| RC02 | Kiểm tra traceability | Matrix cập nhật | Mọi FR/NFR P0/P1 có task, test và link bằng chứng |
+| RC03 | Khởi động soak test | Log/monitoring | 21 tank + PostgreSQL + alarm chạy liên tục, theo dõi memory/queue/timeout |
+| RC04 | UAT nội bộ | Biên bản nội bộ | Operator thực hiện dashboard, ack, maintenance, query và CSV |
+
+#### Ngày 25 Kết thúc soak nội bộ và phát hành RC
+
+| Mã | Công việc | Đầu ra | Điều kiện hoàn thành |
+|---|---|---|---|
+| RC05 | Đánh giá soak nội bộ | Stability report | Không crash/treo/mất dữ liệu nghiêm trọng; mọi bất thường có kết luận |
+| RC06 | Khóa release | Release package/checksum | Version, source, installer, migration, config và checksum đầy đủ |
+| RC07 | Hoàn thiện tài liệu | Bộ tài liệu | Installation/User/Admin/Troubleshooting/Backup/Release notes đồng bộ |
+| RC08 | Go/No-Go | Biên bản quyết định | Chỉ Go khi traceability/DoD đạt và không còn lỗi Critical/High |
+
+**Cổng M5:** Release Candidate chỉ được đưa ra hiện trường khi có Go, backup restore được, traceability đầy đủ và không còn lỗi Critical/High.
+
+## 8. Tuần SAT/UAT hiện trường
+
+### Ngày 26–27 Cài đặt và SAT
 
 - Cài đặt trên máy giám sát thực tế.
 - Cấu hình COM port/gateway thực tế.
@@ -395,10 +481,12 @@ Một task chỉ được đánh dấu Done khi:
 - So sánh PV/SV giữa phần mềm và controller.
 - Mô phỏng ít nhất một High, Low, Sensor Error và Offline.
 - Kiểm tra đường dẫn backup và export.
+- Kiểm tra PostgreSQL service, tài khoản ứng dụng, firewall/TLS và phiên bản migration.
+- Dừng PostgreSQL có kiểm soát để xác nhận cảnh báo, hàng đợi cục bộ và ghi bù sau phục hồi.
 
 **Tiêu chí hoàn thành:** tất cả 21 tank online hoặc có biên bản ghi rõ điểm chưa sẵn sàng do phần cứng; dữ liệu hợp lệ không bị gán nhầm tank.
 
-### Ngày 23–25 Chạy ổn định và UAT
+### Ngày 28–30 Chạy ổn định và UAT
 
 - Chạy liên tục tối thiểu 72 giờ.
 - Theo dõi timeout, reconnect, dung lượng database và log.
@@ -407,7 +495,7 @@ Một task chỉ được đánh dấu Done khi:
 - Đào tạo operator và administrator.
 - Ký biên bản UAT và bàn giao.
 
-**Cổng M8:** đáp ứng toàn bộ Definition of Done cấp project trong phần 10.
+**Cổng M6:** đáp ứng toàn bộ Definition of Done trong tài liệu yêu cầu, ma trận truy vết đã cập nhật bằng chứng SAT/UAT và biên bản được ký.
 
 ## 9. Tiêu chí nghiệm thu định lượng
 
@@ -416,67 +504,39 @@ Một task chỉ được đánh dấu Done khi:
 | Build | Build Release thành công, không có lỗi biên dịch |
 | Driver | CRC, frame parser và exception handling vượt toàn bộ test |
 | Độ chính xác | PV/SV khớp giá trị hiển thị trên controller theo độ phân giải thiết bị |
+| Register/scale | Giá trị âm, decimal, sensor error và bit alarm khớp register map/controller thật |
 | Polling | 21 tank được cập nhật trong chu kỳ đã thống nhất |
+| Offline backoff | Nhiều thiết bị Offline không làm thiết bị Online vượt chu kỳ đã chốt; không retry vô hạn |
 | Mở rộng | Simulator hoặc hệ thống test chạy được 40 tank trên ít nhất hai connection |
 | UI | Không treo khi nhiều thiết bị timeout; hiển thị rõ ở 1920 x 1080 |
 | Reconnect | Tự kết nối lại sau khi đường truyền được phục hồi, mục tiêu không quá 30 giây |
-| Alarm | Không tạo alarm trùng; lưu đúng start, end và acknowledge |
+| Alarm | Không tạo alarm trùng; lưu đúng source/start/end/acknowledge và phát hiện mismatch |
+| Maintenance | Có reason/user/start/end/expiry/audit; hiển thị rõ và không xóa alarm |
 | Dữ liệu | Không lưu giá trị lỗi như PV hợp lệ; timestamp và tank mapping chính xác |
 | Query | Truy vấn một tháng của một tank mục tiêu dưới 3 giây |
-| Export | File mở được và khớp dữ liệu được lọc |
+| Export | CSV mở được, không cần Excel và khớp dữ liệu được lọc; Excel chỉ nghiệm thu khi nằm trong phạm vi đã duyệt |
 | Backup | Backup được restore thành công trên môi trường kiểm thử |
+| PostgreSQL | Ứng dụng dùng role quyền tối thiểu; migration đúng phiên bản; mất kết nối không dừng polling và ghi bù không trùng |
 | Ổn định | Chạy liên tục tối thiểu 72 giờ không crash hoặc mất dữ liệu nghiêm trọng |
 | Bảo mật | Operator không thay đổi được cấu hình quản trị |
+| Audit identity | Acknowledge/config lưu đúng người; không dùng tài khoản chung không truy vết được |
+| Watchdog | Heartbeat, startup, restart limit/backoff và log nguyên nhân hoạt động đúng |
+| Traceability | Mọi FR/NFR P0/P1 có task, test và bằng chứng kết quả |
+| Dependency | Có SBOM/dependency register; không còn license hoặc lỗ hổng Critical/High chưa xử lý |
 | Triển khai | Cài đặt được trên máy không có Visual Studio |
 | UAT | Không còn lỗi Critical/High và có xác nhận của đại diện vận hành |
 
-## 10. Definition of Done cấp project
+## 10. Kiểm soát Definition of Done
 
-Project chỉ được coi là hoàn thành khi tất cả điều kiện sau được đáp ứng:
+Definition of Done duy nhất của project nằm tại phần 13 của [tài liệu yêu cầu](./Yeu-cau-project-phan-mem-giam-sat-hoa-chat-SEMV.md). Lộ trình này không duy trì một bản DoD thứ hai để tránh sai khác.
 
-### 10.1 Chức năng
+Trước khi qua cổng M5/M6, người phụ trách phải:
 
-- [ ] Dashboard hiển thị đúng toàn bộ 21 tank.
-- [ ] Hỗ trợ cấu hình mở rộng tối thiểu 40 tank.
-- [ ] Đọc đúng PV và SV theo phạm vi đã chốt.
-- [ ] High, Low, Sensor Error và Communication Error hoạt động đúng.
-- [ ] Acknowledge và lịch sử alarm hoạt động đúng.
-- [ ] Lưu lịch sử nhiệt độ đúng chu kỳ.
-- [ ] Tra cứu, biểu đồ và export hoạt động đúng.
-- [ ] Cấu hình tank, device và connection được validate.
-- [ ] Backup và restore đã được kiểm thử.
-- [ ] Audit log ghi nhận đúng thao tác quan trọng.
-
-### 10.2 Độ ổn định
-
-- [ ] Không crash khi mất hoặc phục hồi RS485.
-- [ ] Một thiết bị lỗi không làm dừng thiết bị khác.
-- [ ] Một tuyến lỗi không làm dừng tuyến khác.
-- [ ] Không treo UI khi polling hoặc export.
-- [ ] Chạy liên tục tối thiểu 72 giờ đạt yêu cầu.
-
-### 10.3 Kiểm thử
-
-- [ ] Unit test P0 chạy thành công.
-- [ ] Integration test với controller thật hoàn thành.
-- [ ] Test 21 tank hoàn thành.
-- [ ] Test mở rộng 40 tank bằng simulator hoặc phần cứng hoàn thành.
-- [ ] Fault injection test hoàn thành.
-- [ ] Không còn lỗi Critical hoặc High.
-
-### 10.4 Bàn giao
-
-- [ ] Source code và solution đã bàn giao.
-- [ ] Database schema/migration đã bàn giao.
-- [ ] Installer Release x64 đã bàn giao.
-- [ ] Configuration mẫu 21 tank đã bàn giao.
-- [ ] Simulator/công cụ test đã bàn giao.
-- [ ] Tài liệu cài đặt đã bàn giao.
-- [ ] Tài liệu vận hành đã bàn giao.
-- [ ] Tài liệu backup/restore đã bàn giao.
-- [ ] Danh sách dependency và license đã bàn giao.
-- [ ] Operator và Administrator đã được đào tạo.
-- [ ] Biên bản UAT đã được ký xác nhận.
+- [ ] Đánh dấu kết quả từng yêu cầu P0/P1 trong [Traceability Matrix](./Traceability-Matrix-SEMV.md).
+- [ ] Gắn đường dẫn hoặc mã báo cáo test, ảnh, log, biên bản cho từng test bắt buộc.
+- [ ] Xác nhận không còn dòng P0/P1 ở trạng thái Missing/Blocked/Failed.
+- [ ] Xác nhận mọi ngoại lệ có owner, mức rủi ro và phê duyệt bằng văn bản.
+- [ ] Xác nhận source, migration, installer, SBOM/dependency register, cấu hình mẫu và tài liệu bàn giao cùng version Release Candidate.
 
 ## 11. Danh sách sản phẩm bàn giao
 
@@ -485,14 +545,16 @@ Project chỉ được coi là hoàn thành khi tất cả điều kiện sau đ
 | Source code | Toàn bộ C# source, solution và project files |
 | Release package | Executable, dependencies và configuration mặc định |
 | Installer | Cài mới, nâng cấp và gỡ cài đặt |
-| Database | Schema, migration và database mẫu |
+| Database | PostgreSQL schema, migration, partition/index, script role/quyền và dữ liệu mẫu không nhạy cảm |
 | Device configuration | Danh sách tank, connection và Modbus address |
 | Test tools | Simulator hoặc chương trình kiểm tra Modbus |
 | Test report | Unit, integration, SAT, soak test và UAT |
+| Traceability | Ma trận FR/NFR–task–test–bằng chứng đã cập nhật trạng thái cuối |
+| Dependency/SBOM | Tên, version, nguồn, license, mục đích, trạng thái phê duyệt và kết quả kiểm tra bảo mật |
 | Installation guide | Yêu cầu máy, cài đặt, cấu hình và nâng cấp |
 | User guide | Dashboard, alarm, lịch sử, export và acknowledge |
 | Admin guide | Device, threshold, account, backup và restore |
-| Troubleshooting | COM port, timeout, offline, log và phục hồi |
+| Troubleshooting | COM port, timeout, offline, PostgreSQL, queue, watchdog, log và phục hồi |
 | Release notes | Version, thay đổi, giới hạn và known issues |
 
 ## 12. Phân công trách nhiệm đề xuất
@@ -513,6 +575,9 @@ Project chỉ được coi là hoàn thành khi tất cả điều kiện sau đ
 |---|---|---|
 | Controller không có RS485 | Không thể dùng driver Modbus trực tiếp | Xác nhận model; thay controller hoặc bổ sung gateway phù hợp |
 | Thiếu register map | Không xác nhận được dữ liệu | Lấy manual/sample chính thức; không phát hành dựa trên register suy đoán |
+| Sai signed/scale/decimal | Hiển thị và cảnh báo sai nhiệt độ | Test giá trị âm/biên, register catalog có nguồn và đối chiếu controller thật |
+| Block read không được controller hỗ trợ | Timeout/exception và mất chu kỳ quét | Spike sớm, chỉ dùng khi có bằng chứng và luôn có fallback single read |
+| Nhiều thiết bị Offline | Làm chậm toàn tuyến | Retry giới hạn, offline backoff/probe và test tải 21/40 thiết bị |
 | Không có thiết bị thật | Không nghiệm thu được driver | Phát triển bằng simulator nhưng dừng cổng nghiệm thu M1/M6 |
 | Nhiễu RS485 | Timeout và dữ liệu không ổn định | Logging, retry, kiểm tra topology/cáp/termination với kỹ thuật điện |
 | Trùng Modbus address | Dữ liệu sai hoặc xung đột | Validate cấu hình và kiểm tra từng controller |
@@ -521,16 +586,23 @@ Project chỉ được coi là hoàn thành khi tất cả điều kiện sau đ
 | Yêu cầu ghi SV phát sinh | Tăng rủi ro vận hành | Tách change request, thêm phân quyền và xác nhận hai bước |
 | Yêu cầu remote access | Tăng phạm vi và bảo mật | Tách giai đoạn 2, cần IT phê duyệt |
 | Antivirus chặn ứng dụng | Không triển khai được | Kiểm thử installer sớm trên môi trường IT cung cấp |
-| Database tăng nhanh | Chậm truy vấn/đầy ổ | Retention, index, backup và cảnh báo dung lượng |
+| Database tăng nhanh | Chậm truy vấn/đầy ổ | Partition theo thời gian, retention, index, capacity test, backup và cảnh báo dung lượng |
+| PostgreSQL service/mạng bị gián đoạn | Mất khả năng ghi lịch sử | Health check, reconnect có backoff, hàng đợi bền vững 24 giờ và ghi bù idempotent |
+| Sai cấu hình quyền/TLS/firewall | Không kết nối được hoặc tăng rủi ro bảo mật | Kiểm tra sớm với IT, dùng role quyền tối thiểu và không public cổng database |
+| Nguồn alarm không thống nhất | Operator hiểu sai tình trạng | Lưu riêng nguồn, xác nhận AL1/AL2 và AlarmMismatch có delay |
+| Tài khoản Operator dùng chung | Audit không có giá trị | Quick switch/Windows identity; acknowledge gắn đúng phiên người dùng |
+| Watchdog restart lặp | Gián đoạn vận hành | Restart limit, backoff, heartbeat và yêu cầu can thiệp sau ngưỡng |
+| License/dependency chưa duyệt | Không được phép phát hành | Review ở M0, CSV bắt buộc, khóa version và SBOM trước RC |
 
 ## 14. Quy tắc xử lý blocker và thay đổi
 
 - Blocker phải ghi rõ nguyên nhân, người phụ trách và ngày cần phản hồi.
-- Thời gian bị chặn do thiếu controller, register map hoặc quyền IT không tính vào 20 ngày phát triển.
+- M0 và thời gian bị chặn do thiếu controller, register map, môi trường PostgreSQL, dependency/license hoặc quyền IT không tính vào 25 ngày phát triển.
 - Bug làm sai dữ liệu, mất alarm hoặc crash được xếp mức Critical/High và phải sửa trước release.
 - Yêu cầu mới ngoài phạm vi phiên bản 1 phải tạo change request.
 - Remote access, ghi SV, tích hợp MES/SCADA và nhiều máy trạm là thay đổi phạm vi đáng kể.
-- Sau ngày 20 chỉ sửa bug cho Release Candidate; không thêm tính năng mới nếu chưa đánh giá lại tiến độ.
+- Sau ngày 20 chỉ hardening, hoàn thiện test/tài liệu và sửa bug cho Release Candidate; không thêm tính năng mới nếu chưa đánh giá lại tiến độ.
+- Windows Service, remote access, ghi SV, notification, MES/SCADA và Excel khi chưa duyệt license phải được quản lý như change request/P2.
 
 ## 15. Theo dõi tiến độ hàng ngày
 
@@ -542,6 +614,7 @@ Mỗi ngày cần cập nhật tối thiểu:
 - Bug mới phát hiện.
 - Blocker và người cần xử lý.
 - Thay đổi phạm vi nếu có.
+- Dòng traceability được cập nhật và link bằng chứng test.
 - Kế hoạch ngày tiếp theo.
 
 Mẫu cập nhật:
@@ -566,6 +639,6 @@ Kế hoạch tiếp theo:
 
 ## 16. Kết luận kế hoạch
 
-Lộ trình mục tiêu gồm 20 ngày phát triển và 5 ngày dự phòng hiện trường. Driver Modbus và xác nhận dữ liệu thiết bị là đường găng của project. Dashboard, database và simulator có thể phát triển song song, nhưng phần mềm không được nghiệm thu nếu chưa kiểm thử trên controller thật.
+Lộ trình mục tiêu gồm M0 ngoài thời gian, 25 ngày phát triển và 5 ngày SAT/UAT hiện trường. Driver Modbus, bằng chứng register/scale, mô hình nguồn alarm và môi trường PostgreSQL là các đầu vào đường găng. Phần mềm không được nghiệm thu nếu chưa kiểm thử trên controller thật, chưa restore backup PostgreSQL thành công hoặc ma trận truy vết còn yêu cầu P0/P1 thiếu bằng chứng.
 
-Để giữ tiến độ 4 tuần, các đầu vào P0 gồm model controller, register map, thiết bị RS485, danh sách tank và ngưỡng alarm phải được cung cấp trong hai ngày đầu. Tuần dự phòng được dành cho SAT, chạy ổn định 72 giờ và xử lý các vấn đề chỉ xuất hiện tại hiện trường.
+Để giữ tiến độ 6 tuần, toàn bộ checklist M0 phải hoàn thành trước ngày phát triển đầu tiên. Tuần cuối dành cho SAT, chạy ổn định tối thiểu 72 giờ, đào tạo và UAT; không dùng tuần này để hoàn thiện tính năng chưa xong.
